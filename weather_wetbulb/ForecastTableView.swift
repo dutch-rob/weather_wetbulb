@@ -1,10 +1,18 @@
+//
+//  ForecastTableView.swift
+//  weather_wetbulb
+//
+//  Created by Rob Boer on 4/8/26.
+//
+
+
 import SwiftUI
 
 struct ForecastTableView: View {
     @ObservedObject var weatherService: WeatherService
 
     private var rows: [ForecastPoint] {
-        Array(weatherService.series.points.prefix(240))
+        Array(weatherService.series24h.points.prefix(240))
     }
 
     var body: some View {
@@ -29,7 +37,9 @@ struct ForecastTableView: View {
 
                     Divider()
 
-                    ForEach(rows) { point in
+                    // Rows
+                    ForEach(Array(rows.indices), id: \.self) { i in
+                        let point = rows[i]
                         HStack {
                             Text(formatTime(point.date))
                                 .frame(width: 120, alignment: .leading)
@@ -76,6 +86,5 @@ struct ForecastTableView: View {
 }
 
 #Preview {
-    // Preview with an empty WeatherService; UI will show headers
     ForecastTableView(weatherService: WeatherService())
 }

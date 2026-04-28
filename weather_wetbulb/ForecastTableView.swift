@@ -12,12 +12,24 @@ struct ForecastTableView: View {
     @ObservedObject var weatherService: WeatherService
 
     private var rows: [ForecastPoint] {
-        Array(weatherService.series24h.points.prefix(240))
+        Array(weatherService.series10d.points)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Hourly Forecast (Next 240)")
+            if !weatherService.placeDescription.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(weatherService.placeDescription)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("Table")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding([.top, .horizontal])
+            }
+
+            Text("Hourly Forecast (Next 24h)")
                 .font(.headline)
                 .padding([.top, .horizontal])
 
@@ -25,13 +37,13 @@ struct ForecastTableView: View {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     // Header row
                     HStack {
-                        Text("Time").bold().frame(width: 120, alignment: .leading)
-                        Text("Temp (°F)").bold().frame(width: 90, alignment: .trailing)
-                        Text("Apparent (°F)").bold().frame(width: 120, alignment: .trailing)
-                        Text("Dew Point (°F)").bold().frame(width: 120, alignment: .trailing)
-                        Text("Precip Prob").bold().frame(width: 100, alignment: .trailing)
-                        Text("Precip Amt (mm)").bold().frame(width: 130, alignment: .trailing)
-                        Text("Wind (mph)").bold().frame(width: 100, alignment: .trailing)
+                        Text("Time").bold().frame(width: 100, alignment: .leading)
+                        Text("Temp (°F)").bold().frame(width: 80, alignment: .trailing)
+                        Text("Wet bulb (°F)").bold().frame(width: 110, alignment: .trailing)
+                        Text("Dew Point (°F)").bold().frame(width: 110, alignment: .trailing)
+                        Text("Precip Prob").bold().frame(width: 90, alignment: .trailing)
+                        Text("Precip Amt (mm)").bold().frame(width: 120, alignment: .trailing)
+                        Text("Wind (mph)").bold().frame(width: 90, alignment: .trailing)
                     }
                     .padding(.horizontal)
 
@@ -42,19 +54,19 @@ struct ForecastTableView: View {
                         let point = rows[i]
                         HStack {
                             Text(formatTime(point.date))
-                                .frame(width: 120, alignment: .leading)
+                                .frame(width: 100, alignment: .leading)
                             Text(formatNumber(point.temperatureF))
-                                .frame(width: 90, alignment: .trailing)
-                            Text(formatNumber(point.apparentTemperatureF))
-                                .frame(width: 120, alignment: .trailing)
+                                .frame(width: 80, alignment: .trailing)
+                            Text(formatNumber(point.wetBulbF))
+                                .frame(width: 110, alignment: .trailing)
                             Text(formatNumber(point.dewPointF))
-                                .frame(width: 120, alignment: .trailing)
+                                .frame(width: 110, alignment: .trailing)
                             Text(formatPercent(point.precipProbability))
-                                .frame(width: 100, alignment: .trailing)
+                                .frame(width: 90, alignment: .trailing)
                             Text(formatMM(point.precipAmountMM))
-                                .frame(width: 130, alignment: .trailing)
+                                .frame(width: 120, alignment: .trailing)
                             Text(formatNumber(point.windSpeedMPH))
-                                .frame(width: 100, alignment: .trailing)
+                                .frame(width: 90, alignment: .trailing)
                         }
                         .padding(.horizontal)
                     }
@@ -67,9 +79,13 @@ struct ForecastTableView: View {
 
     private func formatTime(_ date: Date) -> String {
         let df = DateFormatter()
-        df.dateStyle = .none
-        df.timeStyle = .short
-        return df.string(from: date)
+        df.locale = Locale.current
+        df.dateFormat = "EE HH:mm" // e.g., Mon 14:00
+        let s = df.string(from: date)
+        // Convert 3-letter day to 2-letter manually for most locales
+        let map = ["Mon": "Mo", "Tue": "Tu", "Wed": "We", "Thu": "Th", "Fri": "Fr", "Sat": "Sa", "Sun": "Su"]
+        for (k, v) in map { if s.hasPrefix(k) { return v + String(s.dropFirst(3)) } }
+        return s
     }
 
     private func formatNumber(_ n: Double) -> String {

@@ -161,16 +161,11 @@ final class WeatherService: ObservableObject {
                     // Choose the first result, or nil if none found
                     return response.mapItems.first
                 })
-                if let item = mapItem {
-                    // Prefer a readable title from the placemark, then the item name, else coordinates
-                    if self.placeDescription.isEmpty {
-                        if let title = item.placemark.title, !title.isEmpty {
-                            self.placeDescription = title
-                        } else if let name = item.name, !name.isEmpty {
-                            self.placeDescription = name
-                        } else {
-                            self.placeDescription = "\(location.coordinate.latitude), \(location.coordinate.longitude)"
-                        }
+                if let item = mapItem, self.placeDescription.isEmpty {
+                    if let name = item.name, !name.isEmpty {
+                        self.placeDescription = name
+                    } else {
+                        self.placeDescription = "\(location.coordinate.latitude), \(location.coordinate.longitude)"
                     }
                 }
             } else {

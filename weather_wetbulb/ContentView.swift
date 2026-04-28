@@ -30,92 +30,92 @@ struct ForecastSeries {
 }
 
 struct ContentView: View {
-    @State private var selectedPlace: String = "Irvine"
     @StateObject private var locationProvider = LocationProvider()
     @StateObject private var weather = WeatherService()
-    @State private var navigateToTable: Bool = false
-    
+    @StateObject private var places = PlacesViewModel()
+    @State private var selectedPlace: Place? = nil
+
     @State private var nowTick: Date = .now
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    @State private var showEditPlaces: Bool = false
     
     var body: some View {
         NavigationStack {
             ZStack {
                 TabView {
                     HereTodayView(
-                        title: weather.placeDescription.isEmpty ? selectedPlace : weather.placeDescription,
+                        title: weather.placeDescription.isEmpty ? (selectedPlace?.name ?? "") : weather.placeDescription,
                         series24h: weather.series24h,
                         progress: weather.loadProgress,
                         nowTick: nowTick,
-                        errorMessage: weather.lastErrorMessage
+                        errorMessage: weather.lastErrorMessage,
+                        onRefresh: {
+                            if let place = selectedPlace {
+                                let loc = CLLocation(latitude: place.latitude, longitude: place.longitude)
+                                await weather.loadFor(location: loc)
+                            } else if let loc = locationProvider.currentLocation {
+                                await weather.loadFor(location: loc)
+                            } else {
+                                locationProvider.requestLocation()
+                            }
+                        }
                     )
                         .tabItem {
                             Label("Today", systemImage: "sun.max")
                         }
 
-                    TenDayView(series10d: weather.series10d)
+                    TenDayView(title: weather.placeDescription, series10d: weather.series10d)
                         .tabItem {
                             Label("10-Day", systemImage: "calendar")
                         }
 
-                    Text("Another Screen")
+                    ForecastTableView(weatherService: weather)
                         .tabItem {
-                            Label("More", systemImage: "ellipsis.circle")
+                            Label("Table", systemImage: "table")
                         }
+//                    Text("Another Screen")
+//                        .tabItem {
+//                            Label("More", systemImage: "ellipsis.circle")
+//                        }
                 }
                 .tabViewStyle(PageTabViewStyle())
                 .toolbar {
                     ToolbarItem(placement: .bottomBar) {
                         Menu {
-                            Button("New York") { selectedPlace = "New York" }
-                            Button("Soest") { selectedPlace = "Soest" }
-                            Button("Yucca Valley") { selectedPlace = "Yucca Valley" }
-                            Button("Irvine") { selectedPlace = "Irvine" }
-                        } label: {
-                            Label("places", systemImage: "mappin.and.ellipse")
-                        }
-                    }
-
-                    ToolbarItem(placement: .bottomBar) {
-                        NavigationLink {
-                            TenDayView(series10d: weather.series10d)
-                        } label: {
-                            Text("10day")
-                        }
-                    }
-
-                    ToolbarItem(placement: .bottomBar) {
-                        Button {
-                            if let loc = locationProvider.currentLocation {
-                                Task { await weather.loadFor(location: loc) }
-                            } else {
-                                locationProvider.requestLocation()
+                            Button("Here") {
+                                if let loc = locationProvider.currentLocation {
+                                    Task { await weather.loadFor(location: loc) }
+                                } else {
+                                    locationProvider.requestLocation()
+                                }
                             }
+                            ForEach(places.places) { place in
+                                Button(place.name) {
+                                    selectedPlace = place
+                                    let loc = CLLocation(latitude: place.latitude, longitude: place.longitude)
+                                    Task { await weather.loadFor(location: loc) }
+                                }
+                            }
+                            Divider()
+                            Button("Edit places") { showEditPlaces = true }
                         } label: {
-                            Label("Reload", systemImage: "arrow.clockwise")
+                            Label("Other place", systemImage: "mappin.and.ellipse")
                         }
                     }
                 }
-
-                // Hidden NavigationLink to trigger programmatic navigation on swipe
-                NavigationLink("", isActive: $navigateToTable) {
-                    ForecastTableView(weatherService: weather)
-                }
-                .hidden()
             }
-            .gesture(
-                DragGesture().onEnded { value in
-                    if value.translation.width > 80 && abs(value.translation.height) < 40 {
-                        navigateToTable = true
-                    }
-                }
-            )
+        }
+        .sheet(isPresented: $showEditPlaces) {
+            NavigationStack { EditPlacesView(viewModel: places) }
         }
         .onReceive(locationProvider.$currentLocation.compactMap { $0 }) { loc in
-            Task { await weather.loadFor(location: loc) }
+            if selectedPlace == nil { Task { await weather.loadFor(location: loc) } }
         }
         .task {
-            if let loc = locationProvider.currentLocation {
+            if let place = selectedPlace {
+                let loc = CLLocation(latitude: place.latitude, longitude: place.longitude)
+                await weather.loadFor(location: loc)
+            } else if let loc = locationProvider.currentLocation {
                 await weather.loadFor(location: loc)
             } else {
                 locationProvider.requestLocation()
@@ -133,20 +133,33 @@ struct HereTodayView: View {
     var progress: LoadProgress = LoadProgress()
     var nowTick: Date = .now
     var errorMessage: String? = nil
+    var onRefresh: (() async -> Void)? = nil
 
     private var dateDomain: ClosedRange<Date>? {
         guard let first = series24h.points.first?.date, let last = series24h.points.last?.date else { return nil }
         return first...last
     }
-//ForecastTableView
+
+    private func hourLabel(for date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "HH"
+        return df.string(from: date)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Title: street and place placeholder using selected title
-//                Text(title)
-//                    .font(.title)
-//                    .fontWeight(.semibold)
-//                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !title.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("24 hour forecast")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 if series24h.points.isEmpty {
                     VStack(spacing: 12) {
@@ -205,33 +218,53 @@ struct HereTodayView: View {
                     
                     // Top chart: temperatures (blue actual, green wet bulb, red dew point)
                     Chart(series24h.points) { p in
-                        PointMark(
+                        LineMark(
                             x: .value("Time", p.date),
-                            y: .value("Temp (°F)", p.temperatureF)
+                            y: .value("Temp (°F)", p.temperatureF),
+                            series: .value("temperature", "A")
                         )
                         .foregroundStyle(.blue)
                         .interpolationMethod(.linear)
 
-                        PointMark(
+                        LineMark(
                             x: .value("Time", p.date),
-                            y: .value("Wet Bulb (°F)", p.wetBulbF)
+                            y: .value("Wet Bulb (°F)", p.wetBulbF),
+                            series: .value("wet_bulb", "B")
                         )
                         .foregroundStyle(.green)
                         .interpolationMethod(.linear)
 
-                        PointMark(
+                        LineMark(
                             x: .value("Time", p.date),
-                            y: .value("Dew Point (°F)", p.dewPointF)
+                            y: .value("Dew Point (°F)", p.dewPointF),
+                            series: .value("dew_point", "C")
                         )
                         .foregroundStyle(.red)
                         .interpolationMethod(.linear)
                     }
                     .chartLegend(position: .top)
                     .chartYScale(domain: .automatic(includesZero: false))
+                    .chartYAxis {
+                        AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel().font(.body)
+                        }
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .hour, count: 4)) { value in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel(centered: true) {
+                                Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
+                                    .font(.body)
+                            }
+                        }
+                    }
                     .ifLet(dateDomain) { view, domain in
                         view.chartXScale(domain: domain)
                     }
-                    .frame(height: 300)
+                    .frame(height: 420)
 
                     // Bottom chart: precipitation probability (blue) and wind speed (red)
                     Chart {
@@ -261,13 +294,14 @@ struct HereTodayView: View {
                         view.chartXScale(domain: domain)
                     }
                     .chartYScale(domain: .automatic(includesZero: false))
-//                    .chartYScale(domain: 0...100)
                     .chartYAxis {
-                        AxisMarks(position: .leading) { _ in
-                            AxisValueLabel() // default for left axis
+                        AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel().font(.body)
                         }
                     }
-                    .frame(height: 150)
+                    .frame(height: 220)
                     
 //                    Text("Points: \(series.points.count)  First: \(series.points.first?.date.formatted(date: .abbreviated, time: .shortened) ?? "-")")
 //                        .font(.footnote)
@@ -284,50 +318,94 @@ struct HereTodayView: View {
             }
             .padding()
         }
+        .refreshable {
+            await onRefresh?()
+        }
         .navigationTitle(title)
     }
 }
 
 struct TenDayView: View {
+    var title: String = ""
     var series10d: ForecastSeries
     
+    private var startMidnight: Date? {
+        guard let first = series10d.points.first?.date else { return nil }
+        let cal = Calendar.current
+        let midnight = cal.startOfDay(for: first)
+        if first > midnight { return cal.date(byAdding: .day, value: 1, to: midnight) }
+        return midnight
+    }
+
+    private func dayLabel(for date: Date) -> String {
+        guard let start = startMidnight, date >= start,
+              Calendar.current.component(.hour, from: date) == 0 else { return "" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "EEE"
+        let key = fmt.string(from: date)
+        let map = ["Mon":"Mo","Tue":"Tu","Wed":"We","Thu":"Th","Fri":"Fr","Sat":"Sa","Sun":"Su"]
+        return map[key] ?? String(key.prefix(2))
+    }
+
     var body: some View {
-        VStack {
-            Text("10-Day Forecast")
-                .font(.largeTitle)
-                .padding()
-            Spacer()
-            // Top chart: temperatures (blue actual, green wet bulb, red dew point)
+        VStack(alignment: .leading, spacing: 12) {
+            if !title.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("10 day forecast")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Chart(series10d.points) { p in
-                PointMark(
+                LineMark(
                     x: .value("Time", p.date),
-                    y: .value("Temp (°F)", p.temperatureF)
+                    y: .value("Temp (°F)", p.temperatureF),
+                    series: .value("temperature", "A")
                 )
                 .foregroundStyle(.blue)
                 .interpolationMethod(.linear)
 
-                PointMark(
+                LineMark(
                     x: .value("Time", p.date),
-                    y: .value("Wet Bulb (°F)", p.wetBulbF)
+                    y: .value("Wet Bulb (°F)", p.wetBulbF),
+                    series: .value("wet_bulb", "B")
                 )
                 .foregroundStyle(.green)
                 .interpolationMethod(.linear)
 
-                PointMark(
+                LineMark(
                     x: .value("Time", p.date),
-                    y: .value("Dew Point (°F)", p.dewPointF)
+                    y: .value("Dew Point (°F)", p.dewPointF),
+                    series: .value("dew_point", "C")
                 )
                 .foregroundStyle(.red)
                 .interpolationMethod(.linear)
             }
             .chartLegend(position: .top)
             .chartYScale(domain: .automatic(includesZero: false))
-//            .ifLet(dateDomain) { view, domain in
-//                view.chartXScale(domain: domain)
-//            }
-            .frame(height: 300)
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel().font(.body)
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel {
+                        Text(value.as(Date.self).map { dayLabel(for: $0) } ?? "")
+                            .font(.body)
+                    }
+                }
+            }
+            .frame(height: 420)
 
-            // Bottom chart: precipitation probability (blue) and wind speed (red)
             Chart {
                 ForEach(series10d.points) { p in
                     let precip = p.precipProbability
@@ -351,19 +429,16 @@ struct TenDayView: View {
                     .symbolSize(0)
                 }
             }
-//            .ifLet(dateDomain) { view, domain in
-//                view.chartXScale(domain: domain)
-//            }
-            .chartYScale(domain: .automatic(includesZero: false))
-//                    .chartYScale(domain: 0...100)
             .chartYAxis {
                 AxisMarks(position: .leading) { _ in
-                    AxisValueLabel() // default for left axis
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel().font(.body)
                 }
             }
-            .frame(height: 150)
-
+            .frame(height: 220)
         }
+        .padding(.horizontal, 24) // Slightly narrower than Today view
         .navigationTitle("10-Day")
     }
 }
@@ -382,3 +457,4 @@ private extension View {
 #Preview {
     ContentView()
 }
+

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Bash(cd \"/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb\" && /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild *)"
+    ]
+  }
+}

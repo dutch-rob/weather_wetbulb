@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>96ND29QYH3.robotex.weather-wetbulb</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>96ND29QYH3</string>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>96ND29QYH3.robotex.weather-wetbulb</string>
+	<key>com.apple.developer.weatherkit</key>
+	<true/>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>

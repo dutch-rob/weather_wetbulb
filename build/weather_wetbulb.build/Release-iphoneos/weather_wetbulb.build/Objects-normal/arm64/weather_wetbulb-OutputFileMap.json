@@ -1,0 +1,61 @@
+{
+  "" : {
+    "const-values" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulb-primary.swiftconstvalues",
+    "dependencies" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulb-primary.d",
+    "diagnostics" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulb-primary.dia",
+    "emit-module-dependencies" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulb-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulb-primary-emit-module.dia",
+    "pch" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulb-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulb-primary.swiftdeps"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/GeneratedAssetSymbols.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/ContentView.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/ContentView.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/EditPlacesView.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/EditPlacesView.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/EditPlacesView.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/EditPlacesView.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/ForecastTableView.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/ForecastTableView.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/ForecastTableView.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/ForecastTableView.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/Item.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Item.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Item.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Item.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/Models.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Models.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Models.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Models.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/Places.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Places.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Places.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/Places.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/WeatherService.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/WeatherService.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/WeatherService.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/WeatherService.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/psychropy.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/psychropy.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/psychropy.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/psychropy.o"
+  },
+  "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/weather_wetbulb/weather_wetbulbApp.swift" : {
+    "index-unit-output-path" : "/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulbApp.o",
+    "llvm-bc" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulbApp.bc",
+    "object" : "/Users/dutchrob/Library/Mobile Documents/com~apple~CloudDocs/xcode/weather_wetbulb/build/weather_wetbulb.build/Release-iphoneos/weather_wetbulb.build/Objects-normal/arm64/weather_wetbulbApp.o"
+  }
+}

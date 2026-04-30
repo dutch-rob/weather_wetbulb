@@ -2,49 +2,153 @@ import Foundation
 import CoreLocation
 import Combine
 import SwiftUI
+import WeatherKit
+
+// MARK: - Place model
 
 struct Place: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String
     var latitude: Double
     var longitude: Double
+    var altitude: Double   // metres above sea level; 0 when unknown
 
-    init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double) {
+    init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double, altitude: Double = 0) {
         self.id = id
         self.name = name
         self.latitude = latitude
         self.longitude = longitude
+        self.altitude = altitude
+    }
+
+    // Backward-compatible decode: altitude was added later; treat missing key as 0.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id        = try c.decode(UUID.self,   forKey: .id)
+        name      = try c.decode(String.self, forKey: .name)
+        latitude  = try c.decode(Double.self, forKey: .latitude)
+        longitude = try c.decode(Double.self, forKey: .longitude)
+        altitude  = try c.decodeIfPresent(Double.self, forKey: .altitude) ?? 0
     }
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
+
+    // Full CLLocation including stored altitude, used for psychrometry and weather fetch.
+    var clLocation: CLLocation {
+        CLLocation(coordinate: coordinate, altitude: altitude,
+                   horizontalAccuracy: -1, verticalAccuracy: altitude == 0 ? -1 : 1,
+                   timestamp: Date())
+    }
 }
+
+// MARK: - PlaceWeatherSnapshot
+
+struct PlaceWeatherSnapshot {
+    let symbolName: String
+    let isDaylight: Bool
+    let uvIndex: Double
+    let temperatureF: Double
+    let apparentTemperatureF: Double
+    let windSpeedMPH: Double
+    let precipitationMM: Double
+    let precipChance: Double    // 0–1
+    let fetchedAt: Date
+}
+
+// MARK: - PlacesViewModel
+
+private let placesWeatherKit = WeatherKit.WeatherService()
 
 final class PlacesViewModel: ObservableObject {
     private let storageKey = "SavedPlaces_v1"
-    
+    private var icloudObserver: AnyCancellable?
+    private var timerCancellable: AnyCancellable?
+    private var refreshTask: Task<Void, Never>?
+
     @Published var places: [Place]
-    @Published var selected: Place? = nil
+    @Published var placesWeather: [UUID: PlaceWeatherSnapshot] = [:]
+    private var lastRefresh: Date?
+
+    private static let defaults: [Place] = [
+        Place(name: "Irvine",       latitude:  33.6846, longitude: -117.8265),
+        Place(name: "Yucca Valley", latitude:  34.1142, longitude: -116.4322),
+        Place(name: "Soest",        latitude:  52.1733, longitude:   5.2917),
+        Place(name: "New York",     latitude:  40.7128, longitude:  -74.0060)
+    ]
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: storageKey),
+        NSUbiquitousKeyValueStore.default.synchronize()
+
+        if let data = NSUbiquitousKeyValueStore.default.data(forKey: "SavedPlaces_v1"),
            let decoded = try? JSONDecoder().decode([Place].self, from: data) {
             self.places = decoded
+        } else if let data = UserDefaults.standard.data(forKey: "SavedPlaces_v1"),
+                  let decoded = try? JSONDecoder().decode([Place].self, from: data) {
+            self.places = decoded
         } else {
-            self.places = [
-                Place(name: "Irvine", latitude: 33.6846, longitude: -117.8265),
-                Place(name: "Yucca Valley", latitude: 34.1142, longitude: -116.4322),
-                Place(name: "Soest", latitude: 52.1733, longitude: 5.2917),
-                Place(name: "New York", latitude: 40.7128, longitude: -74.0060)
-            ]
-            save()
+            self.places = Self.defaults
+        }
+
+        icloudObserver = NotificationCenter.default
+            .publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+                       object: NSUbiquitousKeyValueStore.default)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self,
+                      let data = NSUbiquitousKeyValueStore.default.data(forKey: self.storageKey),
+                      let decoded = try? JSONDecoder().decode([Place].self, from: data)
+                else { return }
+                self.places = decoded
+            }
+
+        // Refresh place weather in background every 20 minutes.
+        timerCancellable = Timer.publish(every: 1200, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.refreshWeatherForAllPlaces()
+            }
+    }
+
+    // Only fetches if last refresh was more than 20 minutes ago.
+    func refreshWeatherIfNeeded() {
+        let interval: TimeInterval = 20 * 60
+        if let last = lastRefresh, Date().timeIntervalSince(last) < interval { return }
+        refreshWeatherForAllPlaces()
+    }
+
+    func refreshWeatherForAllPlaces() {
+        lastRefresh = Date()
+        let snapshot = places   // value-type copy; safe to read off-main
+        refreshTask?.cancel()
+        refreshTask = Task {
+            for place in snapshot {
+                guard !Task.isCancelled else { return }
+                guard let wd = try? await placesWeatherKit.weather(for: place.clLocation) else { continue }
+                let now = Date()
+                let hours = wd.hourlyForecast.forecast
+                guard let nearest = hours.min(by: {
+                    abs($0.date.timeIntervalSince(now)) < abs($1.date.timeIntervalSince(now))
+                }) else { continue }
+                let snap = PlaceWeatherSnapshot(
+                    symbolName:          nearest.symbolName,
+                    isDaylight:          nearest.isDaylight,
+                    uvIndex:             Double(nearest.uvIndex.value),
+                    temperatureF:        nearest.temperature.converted(to: .fahrenheit).value,
+                    apparentTemperatureF: nearest.apparentTemperature.converted(to: .fahrenheit).value,
+                    windSpeedMPH:        nearest.wind.speed.converted(to: .milesPerHour).value,
+                    precipitationMM:     nearest.precipitationAmount.converted(to: .millimeters).value,
+                    precipChance:        Double(nearest.precipitationChance),
+                    fetchedAt:           Date()
+                )
+                placesWeather[place.id] = snap
+            }
         }
     }
 
     func addPlace(name: String, coordinate: CLLocationCoordinate2D) {
-        let place = Place(name: name, latitude: coordinate.latitude, longitude: coordinate.longitude)
-        places.append(place)
+        places.append(Place(name: name, latitude: coordinate.latitude, longitude: coordinate.longitude))
         save()
     }
 
@@ -59,15 +163,24 @@ final class PlacesViewModel: ObservableObject {
             save()
         }
     }
-    
+
     func move(from source: IndexSet, to destination: Int) {
         places.move(fromOffsets: source, toOffset: destination)
         save()
     }
 
+    func update(_ place: Place, name: String, coordinate: CLLocationCoordinate2D) {
+        guard let idx = places.firstIndex(where: { $0.id == place.id }) else { return }
+        places[idx].name      = name
+        places[idx].latitude  = coordinate.latitude
+        places[idx].longitude = coordinate.longitude
+        save()
+    }
+
     private func save() {
-        if let data = try? JSONEncoder().encode(places) {
-            UserDefaults.standard.set(data, forKey: storageKey)
-        }
+        guard let data = try? JSONEncoder().encode(places) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+        NSUbiquitousKeyValueStore.default.set(data, forKey: storageKey)
+        NSUbiquitousKeyValueStore.default.synchronize()
     }
 }

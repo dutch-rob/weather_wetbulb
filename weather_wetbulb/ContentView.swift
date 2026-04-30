@@ -1,460 +1,558 @@
-//
-//  ContentView.swift
-//  weather_wetbulb
-//
-//  Created by Rob Boer on 3/23/26.
-//
-
 import SwiftUI
 import Charts
-import WeatherKit
 import CoreLocation
 import Combine
+
+// MARK: - ForecastPoint
 
 struct ForecastPoint: Identifiable {
     let id = UUID()
     let date: Date
+    let symbolName: String
+    let isDaylight: Bool
+    let uvIndex: Double
     let temperatureF: Double
+    let apparentTemperatureF: Double
     let wetBulbF: Double
     let dewPointF: Double
-    let precipProbability: Double // 0...1
+    let precipProbability: Double   // 0…1
+    let precipitationMM: Double
     let windSpeedMPH: Double
-
-    // Additional fields for table compatibility; computed or defaulted where not provided
-    var apparentTemperatureF: Double { temperatureF } // placeholder if not available
-    var precipAmountMM: Double { 0.0 } // placeholder if not available
+    let cloudCover: Double          // 0…1
+    let cloudCoverLow: Double       // 0…1
+    let cloudCoverMedium: Double    // 0…1
+    let cloudCoverHigh: Double      // 0…1
 }
 
-struct ForecastSeries {
-    let points: [ForecastPoint]
+// MARK: - Shared components
+
+struct ForecastLoadingView: View {
+    var progress: LoadProgress
+    var nowTick: Date
+    var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Loading forecast…")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(LoadStep.allCases) { step in
+                    HStack(spacing: 8) {
+                        stepIcon(for: step)
+                        Text(step.rawValue)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        if case .inProgress(let t) = (progress.steps[step] ?? .pending),
+                           nowTick.timeIntervalSince(t) > 2 {
+                            Text("(working…)")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let errorMessage {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                .padding(.top, 8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 40)
+    }
+
+    @ViewBuilder
+    private func stepIcon(for step: LoadStep) -> some View {
+        switch progress.steps[step] ?? .pending {
+        case .success:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .inProgress(let t):
+            if nowTick.timeIntervalSince(t) > 2 {
+                ProgressView().frame(width: 14, height: 14)
+            } else {
+                Image(systemName: "hourglass").foregroundStyle(.secondary)
+            }
+        case .failure:
+            Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+        case .pending:
+            Image(systemName: "circle.dotted").foregroundStyle(.tertiary)
+        }
+    }
 }
+
+struct ChartLegendRow: View {
+    let entries: [(color: Color, label: String, isArea: Bool)]
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(entries, id: \.label) { e in
+                HStack(spacing: 4) {
+                    if e.isArea {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(e.color.opacity(0.4))
+                            .frame(width: 18, height: 8)
+                    } else {
+                        Rectangle()
+                            .fill(e.color)
+                            .frame(width: 18, height: 2)
+                    }
+                    Text(e.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+struct WeatherAttributionLink: View {
+    let info: WeatherAttributionInfo
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Link(destination: info.legalPageURL) {
+            AsyncImage(
+                url: colorScheme == .dark ? info.darkLogoURL : info.lightLogoURL
+            ) { image in
+                image.resizable().scaledToFit()
+            } placeholder: {
+                Text("Apple Weather").font(.caption2).foregroundStyle(.secondary)
+            }
+            .frame(height: 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+// MARK: - ContentView
 
 struct ContentView: View {
     @StateObject private var locationProvider = LocationProvider()
     @StateObject private var weather = WeatherService()
     @StateObject private var places = PlacesViewModel()
     @State private var selectedPlace: Place? = nil
-
     @State private var nowTick: Date = .now
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
-    @State private var showEditPlaces: Bool = false
-    
+    @State private var showPlaces = false
+    @State private var selectedTab = 0
+
+    private var displayTitle: String {
+        if let name = selectedPlace?.name { return name }
+        return weather.placeDescription.isEmpty ? "Loading…" : weather.placeDescription
+    }
+
     var body: some View {
-        NavigationStack {
-            ZStack {
-                TabView {
+        VStack(spacing: 0) {
+            // Line 1: fixed place name – taps open the places sheet
+            Button { showPlaces = true } label: {
+                Text(displayTitle)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal)
+            }
+            .background(.bar)
+
+            Divider()
+
+            // Line 2 (tab subtitle) + content swipe as one unit
+            TabView(selection: $selectedTab) {
+                VStack(spacing: 0) {
+                    tabLabel("24 hour forecast")
                     HereTodayView(
-                        title: weather.placeDescription.isEmpty ? (selectedPlace?.name ?? "") : weather.placeDescription,
-                        series24h: weather.series24h,
+                        series: weather.series24h,
                         progress: weather.loadProgress,
                         nowTick: nowTick,
                         errorMessage: weather.lastErrorMessage,
-                        onRefresh: {
-                            if let place = selectedPlace {
-                                let loc = CLLocation(latitude: place.latitude, longitude: place.longitude)
-                                await weather.loadFor(location: loc)
-                            } else if let loc = locationProvider.currentLocation {
-                                await weather.loadFor(location: loc)
-                            } else {
-                                locationProvider.requestLocation()
-                            }
-                        }
+                        attribution: weather.attribution,
+                        onRefresh: { await loadWeather() }
                     )
-                        .tabItem {
-                            Label("Today", systemImage: "sun.max")
-                        }
-
-                    TenDayView(title: weather.placeDescription, series10d: weather.series10d)
-                        .tabItem {
-                            Label("10-Day", systemImage: "calendar")
-                        }
-
-                    ForecastTableView(weatherService: weather)
-                        .tabItem {
-                            Label("Table", systemImage: "table")
-                        }
-//                    Text("Another Screen")
-//                        .tabItem {
-//                            Label("More", systemImage: "ellipsis.circle")
-//                        }
                 }
-                .tabViewStyle(PageTabViewStyle())
-                .toolbar {
-                    ToolbarItem(placement: .bottomBar) {
-                        Menu {
-                            Button("Here") {
-                                if let loc = locationProvider.currentLocation {
-                                    Task { await weather.loadFor(location: loc) }
-                                } else {
-                                    locationProvider.requestLocation()
-                                }
-                            }
-                            ForEach(places.places) { place in
-                                Button(place.name) {
-                                    selectedPlace = place
-                                    let loc = CLLocation(latitude: place.latitude, longitude: place.longitude)
-                                    Task { await weather.loadFor(location: loc) }
-                                }
-                            }
-                            Divider()
-                            Button("Edit places") { showEditPlaces = true }
-                        } label: {
-                            Label("Other place", systemImage: "mappin.and.ellipse")
-                        }
-                    }
+                .tag(0)
+
+                VStack(spacing: 0) {
+                    tabLabel("10 day forecast")
+                    TenDayView(
+                        series: weather.series10d,
+                        progress: weather.loadProgress,
+                        nowTick: nowTick,
+                        errorMessage: weather.lastErrorMessage,
+                        attribution: weather.attribution
+                    )
                 }
+                .tag(1)
+
+                VStack(spacing: 0) {
+                    tabLabel("table")
+                    ForecastTableView(weatherService: weather, nowTick: nowTick)
+                }
+                .tag(2)
             }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
         }
-        .sheet(isPresented: $showEditPlaces) {
-            NavigationStack { EditPlacesView(viewModel: places) }
+        .safeAreaInset(edge: .bottom) {
+            Button { showPlaces = true } label: {
+                Label("Places", systemImage: "mappin.and.ellipse")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+            }
+            .background(.bar)
+        }
+        .sheet(isPresented: $showPlaces) {
+            NavigationStack {
+                PlacesListView(
+                    placesVM: places,
+                    locationProvider: locationProvider,
+                    currentWeather: weather,
+                    onSelect: { place in
+                        selectedPlace = place
+                        showPlaces = false
+                        Task { await loadWeather() }
+                    }
+                )
+            }
+            .presentationDetents([.large])
         }
         .onReceive(locationProvider.$currentLocation.compactMap { $0 }) { loc in
             if selectedPlace == nil { Task { await weather.loadFor(location: loc) } }
         }
         .task {
-            if let place = selectedPlace {
-                let loc = CLLocation(latitude: place.latitude, longitude: place.longitude)
-                await weather.loadFor(location: loc)
-            } else if let loc = locationProvider.currentLocation {
-                await weather.loadFor(location: loc)
-            } else {
-                locationProvider.requestLocation()
-            }
+            await loadWeather()
+            places.refreshWeatherIfNeeded()
         }
-        .onReceive(progressTimer) { tick in
-            nowTick = tick
+        .onReceive(progressTimer) { nowTick = $0 }
+    }
+
+    @ViewBuilder
+    private func tabLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(.bar)
+        Divider()
+    }
+
+    private func loadWeather() async {
+        if let place = selectedPlace {
+            await weather.loadFor(location: place.clLocation)
+        } else if let loc = locationProvider.currentLocation {
+            await weather.loadFor(location: loc)
+        } else {
+            locationProvider.requestLocation()
         }
     }
 }
 
+// MARK: - HereTodayView
+
 struct HereTodayView: View {
-    var title: String = "Today"
-    var series24h: ForecastSeries
+    var series: [ForecastPoint]
     var progress: LoadProgress = LoadProgress()
     var nowTick: Date = .now
     var errorMessage: String? = nil
+    var attribution: WeatherAttributionInfo? = nil
     var onRefresh: (() async -> Void)? = nil
 
     private var dateDomain: ClosedRange<Date>? {
-        guard let first = series24h.points.first?.date, let last = series24h.points.last?.date else { return nil }
+        guard let first = series.first?.date, let last = series.last?.date else { return nil }
         return first...last
     }
 
-    private func hourLabel(for date: Date) -> String {
+    private static let hourFormatter: DateFormatter = {
         let df = DateFormatter()
         df.locale = Locale(identifier: "en_US_POSIX")
         df.dateFormat = "HH"
-        return df.string(from: date)
+        return df
+    }()
+
+    private func hourLabel(for date: Date) -> String {
+        HereTodayView.hourFormatter.string(from: date)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if !title.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        Text("24 hour forecast")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if series24h.points.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading forecast…")
-                            .foregroundStyle(.secondary)
-                            .font(.callout)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(LoadStep.allCases) { step in
-                                HStack(spacing: 8) {
-                                    // Icon depending on state
-                                    switch progress.steps[step] ?? .pending {
-                                    case .success:
-                                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                                    case .inProgress(let startedAt):
-                                        if nowTick.timeIntervalSince(startedAt) > 2 {
-                                            ProgressView().frame(width: 14, height: 14)
-                                        } else {
-                                            Image(systemName: "hourglass").foregroundStyle(.secondary)
-                                        }
-                                    case .failure:
-                                        Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-                                    case .pending:
-                                        Image(systemName: "circle.dotted").foregroundStyle(.tertiary)
-                                    }
-                                    Text(step.rawValue)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-
-                                    if case .inProgress(let startedAt) = (progress.steps[step] ?? .pending), nowTick.timeIntervalSince(startedAt) > 2 {
-                                        Text("(working…)")
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        if let errorMessage {
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-                                Text(errorMessage)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-                            .padding(.top, 8)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 40)
+        GeometryReader { geo in
+            let h = geo.size.height
+            ScrollView {
+                if series.isEmpty {
+                    ForecastLoadingView(progress: progress, nowTick: nowTick, errorMessage: errorMessage)
+                        .padding()
+                        .frame(minHeight: h)
                 } else {
-                    // Removed inline domain closure usage, using dateDomain property instead
-                    
-                    // Top chart: temperatures (blue actual, green wet bulb, red dew point)
-                    Chart(series24h.points) { p in
-                        LineMark(
-                            x: .value("Time", p.date),
-                            y: .value("Temp (°F)", p.temperatureF),
-                            series: .value("temperature", "A")
-                        )
-                        .foregroundStyle(.blue)
-                        .interpolationMethod(.linear)
-
-                        LineMark(
-                            x: .value("Time", p.date),
-                            y: .value("Wet Bulb (°F)", p.wetBulbF),
-                            series: .value("wet_bulb", "B")
-                        )
-                        .foregroundStyle(.green)
-                        .interpolationMethod(.linear)
-
-                        LineMark(
-                            x: .value("Time", p.date),
-                            y: .value("Dew Point (°F)", p.dewPointF),
-                            series: .value("dew_point", "C")
-                        )
-                        .foregroundStyle(.red)
-                        .interpolationMethod(.linear)
-                    }
-                    .chartLegend(position: .top)
-                    .chartYScale(domain: .automatic(includesZero: false))
-                    .chartYAxis {
-                        AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
-                            AxisGridLine()
-                            AxisTick()
-                            AxisValueLabel().font(.body)
+                    VStack(spacing: 8) {
+                        temperatureChart(height: h * 0.55)
+                        precipWindChart(height: h * 0.36)
+                        if let attribution {
+                            WeatherAttributionLink(info: attribution)
                         }
                     }
-                    .chartXAxis {
-                        AxisMarks(values: .stride(by: .hour, count: 4)) { value in
-                            AxisGridLine()
-                            AxisTick()
-                            AxisValueLabel(centered: true) {
-                                Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
-                                    .font(.body)
-                            }
-                        }
-                    }
-                    .ifLet(dateDomain) { view, domain in
-                        view.chartXScale(domain: domain)
-                    }
-                    .frame(height: 420)
-
-                    // Bottom chart: precipitation probability (blue) and wind speed (red)
-                    Chart {
-                        ForEach(series24h.points) { p in
-                            let precip = p.precipProbability
-                            let time = p.date
-                            let wind = p.windSpeedMPH
-
-                            AreaMark(
-                                x: .value("Time", time),
-                                y: .value("Precip Prob", precip * 100)
-                            )
-                            .foregroundStyle(Color.blue.opacity(0.3).gradient)
-                            .interpolationMethod(.linear)
-
-                            LineMark(
-                                x: .value("Time", time),
-                                y: .value("Wind (mph)", wind)
-                            )
-                            .foregroundStyle(.red)
-                            .interpolationMethod(.linear)
-                            .symbol(Circle())
-                            .symbolSize(0)
-                        }
-                    }
-                    .ifLet(dateDomain) { view, domain in
-                        view.chartXScale(domain: domain)
-                    }
-                    .chartYScale(domain: .automatic(includesZero: false))
-                    .chartYAxis {
-                        AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
-                            AxisGridLine()
-                            AxisTick()
-                            AxisValueLabel().font(.body)
-                        }
-                    }
-                    .frame(height: 220)
-                    
-//                    Text("Points: \(series.points.count)  First: \(series.points.first?.date.formatted(date: .abbreviated, time: .shortened) ?? "-")")
-//                        .font(.footnote)
-//                        .foregroundStyle(.secondary)
-//                    Text("first-last temp: \(String(describing: series.points.first?.temperatureF)) - \(String(describing: series.points.first?.temperatureF))")
-//                        .font(.footnote)
-//                        .foregroundStyle(.secondary)
-//                    ForEach(series.points) {p in
-//                        Text("date - temp: \(String(describing: p.date)) - \(String(describing: p.temperatureF))")
-//                            .font(.footnote)
-//                            .foregroundStyle(.secondary)
-//                    }
+                    .padding(.horizontal)
+                    .frame(minHeight: h)
                 }
             }
-            .padding()
+            .refreshable { await onRefresh?() }
         }
-        .refreshable {
-            await onRefresh?()
+    }
+
+    @ViewBuilder
+    private func temperatureChart(height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ChartLegendRow(entries: [
+                (.blue,  "Temperature", false),
+                (.green, "Wet Bulb",    false),
+                (.red,   "Dew Point",   false)
+            ])
+            .padding(.leading, 8)
+
+            Chart(series) { p in
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Temp (°F)", p.temperatureF),
+                         series: .value("S", "A"))
+                    .foregroundStyle(.blue).interpolationMethod(.linear)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Wet Bulb (°F)", p.wetBulbF),
+                         series: .value("S", "B"))
+                    .foregroundStyle(.green).interpolationMethod(.linear)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Dew Point (°F)", p.dewPointF),
+                         series: .value("S", "C"))
+                    .foregroundStyle(.red).interpolationMethod(.linear)
+            }
+            .chartLegend(.hidden)
+            .chartYScale(domain: .automatic(includesZero: false))
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
+                    AxisGridLine(); AxisTick()
+                    AxisValueLabel().font(.caption)
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                    AxisGridLine(); AxisTick()
+                    AxisValueLabel(centered: true) {
+                        Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
+                            .font(.caption)
+                    }
+                }
+            }
+            .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .frame(height: height - 20)
         }
-        .navigationTitle(title)
+    }
+
+    @ViewBuilder
+    private func precipWindChart(height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ChartLegendRow(entries: [
+                (.blue, "Precip %",  true),
+                (.red,  "Wind mph",  false)
+            ])
+            .padding(.leading, 8)
+
+            Chart(series) { p in
+                AreaMark(x: .value("Time", p.date),
+                         y: .value("Precip %", p.precipProbability * 100))
+                    .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Wind (mph)", p.windSpeedMPH))
+                    .foregroundStyle(.red).interpolationMethod(.linear)
+                    .symbol(Circle()).symbolSize(0)
+            }
+            .chartLegend(.hidden)
+            .chartYScale(domain: .automatic(includesZero: false))
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
+                    AxisGridLine(); AxisTick()
+                    AxisValueLabel().font(.caption)
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                    AxisGridLine(); AxisTick()
+                    AxisValueLabel(centered: true) {
+                        Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
+                            .font(.caption)
+                    }
+                }
+            }
+            .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .frame(height: height - 20)
+        }
     }
 }
 
+// MARK: - TenDayView
+
 struct TenDayView: View {
-    var title: String = ""
-    var series10d: ForecastSeries
-    
+    var series: [ForecastPoint]
+    var progress: LoadProgress = LoadProgress()
+    var nowTick: Date = .now
+    var errorMessage: String? = nil
+    var attribution: WeatherAttributionInfo? = nil
+
+    private var dateDomain: ClosedRange<Date>? {
+        guard let first = series.first?.date, let last = series.last?.date else { return nil }
+        return first...last
+    }
+
     private var startMidnight: Date? {
-        guard let first = series10d.points.first?.date else { return nil }
+        guard let first = series.first?.date else { return nil }
         let cal = Calendar.current
         let midnight = cal.startOfDay(for: first)
-        if first > midnight { return cal.date(byAdding: .day, value: 1, to: midnight) }
-        return midnight
+        return first > midnight ? cal.date(byAdding: .day, value: 1, to: midnight) : midnight
     }
+
+    private static let dayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "EEE"
+        return df
+    }()
+
+    private static let dayAbbreviations = [
+        "Mon": "Mo", "Tue": "Tu", "Wed": "We",
+        "Thu": "Th", "Fri": "Fr", "Sat": "Sa", "Sun": "Su"
+    ]
 
     private func dayLabel(for date: Date) -> String {
         guard let start = startMidnight, date >= start,
               Calendar.current.component(.hour, from: date) == 0 else { return "" }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "EEE"
-        let key = fmt.string(from: date)
-        let map = ["Mon":"Mo","Tue":"Tu","Wed":"We","Thu":"Th","Fri":"Fr","Sat":"Sa","Sun":"Su"]
-        return map[key] ?? String(key.prefix(2))
+        let key = TenDayView.dayFormatter.string(from: date)
+        return TenDayView.dayAbbreviations[key] ?? String(key.prefix(2))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !title.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Text("10 day forecast")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+        GeometryReader { geo in
+            let h = geo.size.height
+            ScrollView {
+                if series.isEmpty {
+                    ForecastLoadingView(progress: progress, nowTick: nowTick, errorMessage: errorMessage)
+                        .padding()
+                        .frame(minHeight: h)
+                } else {
+                    VStack(spacing: 8) {
+                        temperatureChart(height: h * 0.55)
+                        precipWindChart(height: h * 0.36)
+                        if let attribution {
+                            WeatherAttributionLink(info: attribution)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .frame(minHeight: h)
                 }
             }
+        }
+    }
 
-            Chart(series10d.points) { p in
-                LineMark(
-                    x: .value("Time", p.date),
-                    y: .value("Temp (°F)", p.temperatureF),
-                    series: .value("temperature", "A")
-                )
-                .foregroundStyle(.blue)
-                .interpolationMethod(.linear)
+    @ViewBuilder
+    private func temperatureChart(height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ChartLegendRow(entries: [
+                (.blue,  "Temperature", false),
+                (.green, "Wet Bulb",    false),
+                (.red,   "Dew Point",   false)
+            ])
+            .padding(.leading, 8)
 
-                LineMark(
-                    x: .value("Time", p.date),
-                    y: .value("Wet Bulb (°F)", p.wetBulbF),
-                    series: .value("wet_bulb", "B")
-                )
-                .foregroundStyle(.green)
-                .interpolationMethod(.linear)
-
-                LineMark(
-                    x: .value("Time", p.date),
-                    y: .value("Dew Point (°F)", p.dewPointF),
-                    series: .value("dew_point", "C")
-                )
-                .foregroundStyle(.red)
-                .interpolationMethod(.linear)
+            Chart(series) { p in
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Temp (°F)", p.temperatureF),
+                         series: .value("S", "A"))
+                    .foregroundStyle(.blue).interpolationMethod(.linear)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Wet Bulb (°F)", p.wetBulbF),
+                         series: .value("S", "B"))
+                    .foregroundStyle(.green).interpolationMethod(.linear)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Dew Point (°F)", p.dewPointF),
+                         series: .value("S", "C"))
+                    .foregroundStyle(.red).interpolationMethod(.linear)
             }
-            .chartLegend(position: .top)
+            .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))
             .chartYAxis {
                 AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
-                    AxisGridLine()
-                    AxisTick()
-                    AxisValueLabel().font(.body)
+                    AxisGridLine(); AxisTick()
+                    AxisValueLabel().font(.caption)
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .automatic) { value in
-                    AxisGridLine()
-                    AxisTick()
+                AxisMarks(values: .stride(by: .day, count: 1)) { value in
+                    AxisGridLine(); AxisTick()
                     AxisValueLabel {
                         Text(value.as(Date.self).map { dayLabel(for: $0) } ?? "")
-                            .font(.body)
+                            .font(.caption)
                     }
                 }
             }
-            .frame(height: 420)
+            .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .frame(height: height - 20)
+        }
+    }
 
-            Chart {
-                ForEach(series10d.points) { p in
-                    let precip = p.precipProbability
-                    let time = p.date
-                    let wind = p.windSpeedMPH
+    @ViewBuilder
+    private func precipWindChart(height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ChartLegendRow(entries: [
+                (.blue, "Precip %", true),
+                (.red,  "Wind mph", false)
+            ])
+            .padding(.leading, 8)
 
-                    AreaMark(
-                        x: .value("Time", time),
-                        y: .value("Precip Prob", precip * 100)
-                    )
-                    .foregroundStyle(Color.blue.opacity(0.3).gradient)
-                    .interpolationMethod(.linear)
-
-                    LineMark(
-                        x: .value("Time", time),
-                        y: .value("Wind (mph)", wind)
-                    )
-                    .foregroundStyle(.red)
-                    .interpolationMethod(.linear)
-                    .symbol(Circle())
-                    .symbolSize(0)
-                }
+            Chart(series) { p in
+                AreaMark(x: .value("Time", p.date),
+                         y: .value("Precip %", p.precipProbability * 100))
+                    .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Wind (mph)", p.windSpeedMPH))
+                    .foregroundStyle(.red).interpolationMethod(.linear)
+                    .symbol(Circle()).symbolSize(0)
             }
+            .chartLegend(.hidden)
+            .chartYScale(domain: .automatic(includesZero: false))
             .chartYAxis {
                 AxisMarks(position: .leading) { _ in
-                    AxisGridLine()
-                    AxisTick()
-                    AxisValueLabel().font(.body)
+                    AxisGridLine(); AxisTick()
+                    AxisValueLabel().font(.caption)
                 }
             }
-            .frame(height: 220)
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day, count: 1)) { value in
+                    AxisGridLine(); AxisTick()
+                    AxisValueLabel {
+                        Text(value.as(Date.self).map { dayLabel(for: $0) } ?? "")
+                            .font(.caption)
+                    }
+                }
+            }
+            .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .frame(height: height - 20)
         }
-        .padding(.horizontal, 24) // Slightly narrower than Today view
-        .navigationTitle("10-Day")
     }
 }
+
+// MARK: - View extension
 
 private extension View {
     @ViewBuilder
     func ifLet<T, Content: View>(_ value: T?, transform: (Self, T) -> Content) -> some View {
-        if let v = value {
-            transform(self, v)
-        } else {
-            self
-        }
+        if let v = value { transform(self, v) } else { self }
     }
 }
 
 #Preview {
     ContentView()
 }
-

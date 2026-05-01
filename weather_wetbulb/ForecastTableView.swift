@@ -4,6 +4,8 @@ struct ForecastTableView: View {
     @ObservedObject var weatherService: WeatherService
     var nowTick: Date
 
+    @State private var scrollXOffset: CGFloat = 0
+
     private static let timeFormatter: DateFormatter = {
         let df = DateFormatter()
         df.locale = Locale(identifier: "en_US_POSIX")
@@ -68,15 +70,13 @@ struct ForecastTableView: View {
                 )
                 .padding()
             } else {
+                columnHeaderRow
+                    .offset(x: scrollXOffset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipped()
+
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                        // Sticky column header row (pins vertically, scrolls horizontally).
-                        Section {
-                            Color.clear.frame(height: 0)
-                        } header: {
-                            columnHeaderRow
-                        }
-
                         ForEach(daySections) { section in
                             Section {
                                 ForEach(section.points) { point in
@@ -98,6 +98,18 @@ struct ForecastTableView: View {
                                 .padding()
                         }
                     }
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: HScrollOffsetKey.self,
+                                value: proxy.frame(in: .named("tableScroll")).minX
+                            )
+                        }
+                    )
+                }
+                .coordinateSpace(name: "tableScroll")
+                .onPreferenceChange(HScrollOffsetKey.self) { offset in
+                    scrollXOffset = offset
                 }
             }
         }
@@ -185,6 +197,11 @@ struct ForecastTableView: View {
         let idx = weatherService.series10d.firstIndex(where: { $0.id == p.id }) ?? 0
         return idx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.03)
     }
+}
+
+private struct HScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 #Preview {

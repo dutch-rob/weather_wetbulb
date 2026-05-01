@@ -73,20 +73,23 @@ struct ForecastTableView: View {
                 .padding()
             } else {
                 ScrollView([.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                         ForEach(daySections) { section in
-                            Text(section.title)
-                                .font(.subheadline).fontWeight(.semibold)
-                                .padding(.horizontal)
-                                .padding(.vertical, 4)
-                                .frame(minWidth: totalWidth, alignment: .leading)
-                                .background(.bar)
-
-                            columnHeaderRow
-
-                            ForEach(section.points) { point in
-                                dataRow(point)
-                                    .background(rowBackground(point))
+                            Section {
+                                ForEach(section.points) { point in
+                                    dataRow(point)
+                                        .background(rowBackground(point))
+                                }
+                            } header: {
+                                VStack(spacing: 0) {
+                                    Text(section.title)
+                                        .font(.subheadline).fontWeight(.semibold)
+                                        .padding(.horizontal)
+                                        .padding(.vertical, 4)
+                                        .frame(minWidth: totalWidth, alignment: .leading)
+                                        .background(.bar)
+                                    columnHeaderRow
+                                }
                             }
                         }
 

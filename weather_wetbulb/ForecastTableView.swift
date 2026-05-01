@@ -60,6 +60,10 @@ struct ForecastTableView: View {
     private let wPrecip: CGFloat = 82
     private let wCloud:  CGFloat = 150
 
+    private var totalWidth: CGFloat {
+        wTime + wSym + wUV + wTemp + wWet + wDew + wWind + wPrecip + wCloud + 16
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if weatherService.series10d.isEmpty {
@@ -77,6 +81,19 @@ struct ForecastTableView: View {
 
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                        // Zero-height width anchor: fixes scroll content width and provides
+                        // a reliable origin for tracking horizontal scroll offset.
+                        Color.clear
+                            .frame(width: totalWidth, height: 0)
+                            .background(
+                                GeometryReader { proxy in
+                                    Color.clear.preference(
+                                        key: HScrollOffsetKey.self,
+                                        value: proxy.frame(in: .named("forecastTable")).minX
+                                    )
+                                }
+                            )
+
                         ForEach(daySections) { section in
                             Section {
                                 ForEach(section.points) { point in
@@ -98,21 +115,14 @@ struct ForecastTableView: View {
                                 .padding()
                         }
                     }
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: HScrollOffsetKey.self,
-                                value: proxy.frame(in: .named("tableScroll")).minX
-                            )
-                        }
-                    )
+                    .frame(minWidth: totalWidth)
                 }
-                .coordinateSpace(name: "tableScroll")
                 .onPreferenceChange(HScrollOffsetKey.self) { offset in
                     scrollXOffset = offset
                 }
             }
         }
+        .coordinateSpace(name: "forecastTable")
     }
 
     // MARK: Column header row

@@ -58,6 +58,8 @@ struct ForecastTableView: View {
     private let wPrecip: CGFloat = 82
     private let wCloud:  CGFloat = 150
 
+    @State private var scrollXOffset: CGFloat = 0
+
     private var totalWidth: CGFloat {
         wTime + wSym + wUV + wTemp + wWet + wDew + wWind + wPrecip + wCloud + 16
     }
@@ -72,39 +74,64 @@ struct ForecastTableView: View {
                 )
                 .padding()
             } else {
-                ScrollView([.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                        Section {
-                            Color.clear.frame(height: 0)
-                        } header: {
-                            columnHeaderRow
-                        }
+                columnHeaderRow
+                    .offset(x: scrollXOffset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipped()
 
-                        ForEach(daySections) { section in
-                            Section {
-                                ForEach(section.points) { point in
-                                    dataRow(point)
-                                        .background(rowBackground(point))
+                ScrollViewReader { proxy in
+                    ScrollView([.vertical, .horizontal]) {
+                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                            Color.clear
+                                .frame(width: totalWidth, height: 0)
+                                .id("tableOrigin")
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: HScrollOffsetKey.self,
+                                            value: geo.frame(in: .named("forecastTable")).minX
+                                        )
+                                    }
+                                )
+
+                            ForEach(daySections) { section in
+                                Section {
+                                    ForEach(section.points) { point in
+                                        dataRow(point)
+                                            .background(rowBackground(point))
+                                    }
+                                } header: {
+                                    Text(section.title)
+                                        .font(.subheadline).fontWeight(.semibold)
+                                        .padding(.horizontal)
+                                        .padding(.vertical, 4)
+                                        .frame(minWidth: totalWidth, alignment: .leading)
+                                        .background(.bar)
                                 }
-                            } header: {
-                                Text(section.title)
-                                    .font(.subheadline).fontWeight(.semibold)
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 4)
-                                    .frame(minWidth: totalWidth, alignment: .leading)
-                                    .background(.bar)
+                            }
+
+                            if let attr = weatherService.attribution {
+                                WeatherAttributionLink(info: attr)
+                                    .padding()
                             }
                         }
-
-                        if let attr = weatherService.attribution {
-                            WeatherAttributionLink(info: attr)
-                                .padding()
+                        .frame(minWidth: totalWidth)
+                    }
+                    .onPreferenceChange(HScrollOffsetKey.self) { offset in
+                        scrollXOffset = offset
+                    }
+                    // Reset to origin each time this tab becomes visible, which also
+                    // corrects any horizontal drift caused by the TabView page-swipe gesture.
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            scrollXOffset = 0
+                            proxy.scrollTo("tableOrigin", anchor: .topLeading)
                         }
                     }
-                    .frame(minWidth: totalWidth)
                 }
             }
         }
+        .coordinateSpace(name: "forecastTable")
     }
 
     // MARK: Column header row
@@ -189,6 +216,11 @@ struct ForecastTableView: View {
         let idx = weatherService.series10d.firstIndex(where: { $0.id == p.id }) ?? 0
         return idx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.03)
     }
+}
+
+private struct HScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 #Preview {

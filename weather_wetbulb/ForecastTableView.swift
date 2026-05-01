@@ -86,7 +86,7 @@ struct ForecastTableView: View {
                                         .font(.subheadline).fontWeight(.semibold)
                                         .padding(.horizontal)
                                         .padding(.vertical, 4)
-                                        .frame(minWidth: totalWidth, alignment: .leading)
+                                        .frame(minWidth: totalWidth, alignment: .center)
                                         .background(.bar)
                                     columnHeaderRow
                                 }

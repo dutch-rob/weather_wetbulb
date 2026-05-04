@@ -3,6 +3,7 @@ import SwiftUI
 struct ForecastTableView: View {
     @ObservedObject var weatherService: WeatherService
     var nowTick: Date
+    @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private static let timeFormatter: DateFormatter = {
         let df = DateFormatter()
@@ -108,15 +109,15 @@ struct ForecastTableView: View {
 
     private var columnHeaderRow: some View {
         HStack(spacing: 0) {
-            cell("Time",         width: wTime,   align: .leading,  bold: true)
-            cell("",             width: wSym,    align: .center,   bold: true)   // symbol – no header
-            cell("UV",           width: wUV,     align: .trailing, bold: true)
-            cell("Temp (feels)", width: wTemp,   align: .trailing, bold: true)
-            cell("Wet bulb",     width: wWet,    align: .trailing, bold: true)
-            cell("Dew Pt",       width: wDew,    align: .trailing, bold: true)
-            cell("Wind",         width: wWind,   align: .trailing, bold: true)
-            cell("Precip (%)",   width: wPrecip, align: .trailing, bold: true)
-            cell("Cloud (%)",    width: wCloud,  align: .trailing, bold: true)
+            cell("Time",                                         width: wTime,   align: .leading,  bold: true)
+            cell("",                                             width: wSym,    align: .center,   bold: true)
+            cell("UV",                                           width: wUV,     align: .trailing, bold: true)
+            cell(useFahrenheit ? "Temp/feels °F" : "Temp/feels °C", width: wTemp, align: .trailing, bold: true)
+            cell(useFahrenheit ? "Wet bulb °F"   : "Wet bulb °C",   width: wWet,  align: .trailing, bold: true)
+            cell(useFahrenheit ? "Dew Pt °F"     : "Dew Pt °C",     width: wDew,  align: .trailing, bold: true)
+            cell(useFahrenheit ? "Wind mph"       : "Wind kph",      width: wWind, align: .trailing, bold: true)
+            cell("Precip (%)",                                   width: wPrecip, align: .trailing, bold: true)
+            cell("Cloud (%)",                                    width: wCloud,  align: .trailing, bold: true)
         }
         .font(.caption)
         .padding(.vertical, 6)
@@ -135,11 +136,11 @@ struct ForecastTableView: View {
                 .font(.caption)
                 .frame(width: wSym, alignment: .center)
 
-            cell(fmtUV(p.uvIndex),    width: wUV,     align: .trailing)
-            cell(fmtTemp(p),          width: wTemp,   align: .trailing)
-            cell(fmt1(p.wetBulbF),    width: wWet,    align: .trailing)
-            cell(fmt1(p.dewPointF),   width: wDew,    align: .trailing)
-            cell(fmt1(p.windSpeedMPH), width: wWind,  align: .trailing)
+            cell(fmtUV(p.uvIndex),                                              width: wUV,   align: .trailing)
+            cell(fmtTemp(p),                                                    width: wTemp, align: .trailing)
+            cell(fmt1(useFahrenheit ? p.wetBulbF    : p.wetBulbC),             width: wWet,  align: .trailing)
+            cell(fmt1(useFahrenheit ? p.dewPointF   : p.dewPointC),            width: wDew,  align: .trailing)
+            cell(fmt1(useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),        width: wWind, align: .trailing)
             cell(fmtPrecip(p),        width: wPrecip, align: .trailing)
             cell(fmtCloud(p),         width: wCloud,  align: .trailing)
         }
@@ -154,7 +155,9 @@ struct ForecastTableView: View {
     private func fmtUV(_ n: Double) -> String { String(format: "%d", Int(n)) }
 
     private func fmtTemp(_ p: ForecastPoint) -> String {
-        String(format: "%.1f (%.1f)", p.temperatureF, p.apparentTemperatureF)
+        useFahrenheit
+            ? String(format: "%.1f (%.1f)", p.temperatureF, p.apparentTemperatureF)
+            : String(format: "%.1f (%.1f)", p.temperatureC, p.apparentTemperatureC)
     }
 
     private func fmtPrecip(_ p: ForecastPoint) -> String {

@@ -12,12 +12,17 @@ struct ForecastPoint: Identifiable {
     let isDaylight: Bool
     let uvIndex: Double
     let temperatureF: Double
+    let temperatureC: Double
     let apparentTemperatureF: Double
+    let apparentTemperatureC: Double
     let wetBulbF: Double
+    let wetBulbC: Double
     let dewPointF: Double
+    let dewPointC: Double
     let precipProbability: Double   // 0…1
     let precipitationMM: Double
     let windSpeedMPH: Double
+    let windSpeedKPH: Double
     let cloudCover: Double          // 0…1
     let cloudCoverLow: Double       // 0…1
     let cloudCoverMedium: Double    // 0…1
@@ -146,6 +151,7 @@ struct ContentView: View {
     @State private var showPlaces = false
     @State private var showInfo   = false
     @State private var selectedTab = 0
+    @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private var displayTitle: String {
         if let name = selectedPlace?.name { return name }
@@ -212,9 +218,19 @@ struct ContentView: View {
                         .padding(.vertical, 10)
                 }
 
-                // Info button – bottom-right corner
                 HStack {
+                    // Unit toggle – bottom-left corner
+                    Button { useFahrenheit.toggle() } label: {
+                        Text(useFahrenheit ? "°F" : "°C")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                            .padding(.horizontal)
+                            .padding(.vertical, 10)
+                    }
+
                     Spacer()
+
+                    // Info button – bottom-right corner
                     Button { showInfo = true } label: {
                         Image(systemName: "info.circle")
                             .font(.title3)
@@ -288,6 +304,8 @@ struct HereTodayView: View {
     var attribution: WeatherAttributionInfo? = nil
     var onRefresh: (() async -> Void)? = nil
 
+    @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
+
     private var dateDomain: ClosedRange<Date>? {
         guard let first = series.first?.date, let last = series.last?.date else { return nil }
         return first...last
@@ -332,23 +350,23 @@ struct HereTodayView: View {
     private func temperatureChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue,  "Temperature", false),
-                (.green, "Wet Bulb",    false),
-                (.red,   "Dew Point",   false)
+                (.blue,  useFahrenheit ? "Temp °F"     : "Temp °C",     false),
+                (.green, useFahrenheit ? "Wet Bulb °F" : "Wet Bulb °C", false),
+                (.red,   useFahrenheit ? "Dew Pt °F"   : "Dew Pt °C",   false)
             ])
             .padding(.leading, 8)
 
             Chart(series) { p in
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Temp (°F)", p.temperatureF),
+                         y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
                          series: .value("S", "A"))
                     .foregroundStyle(.blue).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Wet Bulb (°F)", p.wetBulbF),
+                         y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
                          series: .value("S", "B"))
                     .foregroundStyle(.green).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Dew Point (°F)", p.dewPointF),
+                         y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
                          series: .value("S", "C"))
                     .foregroundStyle(.red).interpolationMethod(.linear)
             }
@@ -378,8 +396,8 @@ struct HereTodayView: View {
     private func precipWindChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue, "Precip %",  true),
-                (.red,  "Wind mph",  false)
+                (.blue, "Precip %",                               true),
+                (.red,  useFahrenheit ? "Wind mph" : "Wind kph",  false)
             ])
             .padding(.leading, 8)
 
@@ -388,7 +406,7 @@ struct HereTodayView: View {
                          y: .value("Precip %", p.precipProbability * 100))
                     .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Wind (mph)", p.windSpeedMPH))
+                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH))
                     .foregroundStyle(.red).interpolationMethod(.linear)
                     .symbol(Circle()).symbolSize(0)
             }
@@ -423,6 +441,8 @@ struct TenDayView: View {
     var nowTick: Date = .now
     var errorMessage: String? = nil
     var attribution: WeatherAttributionInfo? = nil
+
+    @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private var dateDomain: ClosedRange<Date>? {
         guard let first = series.first?.date, let last = series.last?.date else { return nil }
@@ -482,23 +502,23 @@ struct TenDayView: View {
     private func temperatureChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue,  "Temperature", false),
-                (.green, "Wet Bulb",    false),
-                (.red,   "Dew Point",   false)
+                (.blue,  useFahrenheit ? "Temp °F"     : "Temp °C",     false),
+                (.green, useFahrenheit ? "Wet Bulb °F" : "Wet Bulb °C", false),
+                (.red,   useFahrenheit ? "Dew Pt °F"   : "Dew Pt °C",   false)
             ])
             .padding(.leading, 8)
 
             Chart(series) { p in
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Temp (°F)", p.temperatureF),
+                         y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
                          series: .value("S", "A"))
                     .foregroundStyle(.blue).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Wet Bulb (°F)", p.wetBulbF),
+                         y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
                          series: .value("S", "B"))
                     .foregroundStyle(.green).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Dew Point (°F)", p.dewPointF),
+                         y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
                          series: .value("S", "C"))
                     .foregroundStyle(.red).interpolationMethod(.linear)
             }
@@ -528,8 +548,8 @@ struct TenDayView: View {
     private func precipWindChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue, "Precip %", true),
-                (.red,  "Wind mph", false)
+                (.blue, "Precip %",                              true),
+                (.red,  useFahrenheit ? "Wind mph" : "Wind kph", false)
             ])
             .padding(.leading, 8)
 
@@ -538,7 +558,7 @@ struct TenDayView: View {
                          y: .value("Precip %", p.precipProbability * 100))
                     .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Wind (mph)", p.windSpeedMPH))
+                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH))
                     .foregroundStyle(.red).interpolationMethod(.linear)
                     .symbol(Circle()).symbolSize(0)
             }

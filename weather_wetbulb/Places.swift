@@ -50,8 +50,11 @@ struct PlaceWeatherSnapshot {
     let isDaylight: Bool
     let uvIndex: Double
     let temperatureF: Double
+    let temperatureC: Double
     let apparentTemperatureF: Double
+    let apparentTemperatureC: Double
     let windSpeedMPH: Double
+    let windSpeedKPH: Double
     let precipitationMM: Double
     let precipChance: Double    // 0–1
     let fetchedAt: Date
@@ -132,15 +135,18 @@ final class PlacesViewModel: ObservableObject {
                     abs($0.date.timeIntervalSince(now)) < abs($1.date.timeIntervalSince(now))
                 }) else { continue }
                 let snap = PlaceWeatherSnapshot(
-                    symbolName:          nearest.symbolName,
-                    isDaylight:          nearest.isDaylight,
-                    uvIndex:             Double(nearest.uvIndex.value),
-                    temperatureF:        nearest.temperature.converted(to: .fahrenheit).value,
+                    symbolName:           nearest.symbolName,
+                    isDaylight:           nearest.isDaylight,
+                    uvIndex:              Double(nearest.uvIndex.value),
+                    temperatureF:         nearest.temperature.converted(to: .fahrenheit).value,
+                    temperatureC:         nearest.temperature.converted(to: .celsius).value,
                     apparentTemperatureF: nearest.apparentTemperature.converted(to: .fahrenheit).value,
-                    windSpeedMPH:        nearest.wind.speed.converted(to: .milesPerHour).value,
-                    precipitationMM:     nearest.precipitationAmount.converted(to: .millimeters).value,
-                    precipChance:        Double(nearest.precipitationChance),
-                    fetchedAt:           Date()
+                    apparentTemperatureC: nearest.apparentTemperature.converted(to: .celsius).value,
+                    windSpeedMPH:         nearest.wind.speed.converted(to: .milesPerHour).value,
+                    windSpeedKPH:         nearest.wind.speed.converted(to: .kilometersPerHour).value,
+                    precipitationMM:      nearest.precipitationAmount.converted(to: .millimeters).value,
+                    precipChance:         Double(nearest.precipitationChance),
+                    fetchedAt:            Date()
                 )
                 placesWeather[place.id] = snap
             }

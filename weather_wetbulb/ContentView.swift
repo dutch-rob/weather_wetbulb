@@ -144,6 +144,7 @@ struct ContentView: View {
     @State private var nowTick: Date = .now
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var showPlaces = false
+    @State private var showInfo   = false
     @State private var selectedTab = 0
 
     private var displayTitle: String {
@@ -203,10 +204,24 @@ struct ContentView: View {
             .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
         }
         .safeAreaInset(edge: .bottom) {
-            Button { showPlaces = true } label: {
-                Label("Places", systemImage: "mappin.and.ellipse")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
+            ZStack {
+                // Places button – centred
+                Button { showPlaces = true } label: {
+                    Label("Places", systemImage: "mappin.and.ellipse")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+
+                // Info button – bottom-right corner
+                HStack {
+                    Spacer()
+                    Button { showInfo = true } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title3)
+                            .padding(.horizontal)
+                            .padding(.vertical, 10)
+                    }
+                }
             }
             .background(.bar)
         }
@@ -222,6 +237,12 @@ struct ContentView: View {
                         Task { await loadWeather() }
                     }
                 )
+            }
+            .presentationDetents([.large])
+        }
+        .sheet(isPresented: $showInfo) {
+            NavigationStack {
+                InfoView()
             }
             .presentationDetents([.large])
         }

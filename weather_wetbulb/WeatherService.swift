@@ -94,6 +94,7 @@ final class WeatherService: ObservableObject {
     @Published var loadProgress: LoadProgress = LoadProgress()
     @Published var lastErrorMessage: String? = nil
     @Published var attribution: WeatherAttributionInfo? = nil
+    @Published var isRefreshing: Bool = false
 
     private var loadGeneration = 0
 
@@ -110,16 +111,22 @@ final class WeatherService: ObservableObject {
             let tempF      = h.temperature.converted(to: .fahrenheit).value
             let tempC      = h.temperature.converted(to: .celsius).value
             let apparentF  = h.apparentTemperature.converted(to: .fahrenheit).value
+            let apparentC  = h.apparentTemperature.converted(to: .celsius).value
             let dewF       = h.dewPoint.converted(to: .fahrenheit).value
+            let dewC       = h.dewPoint.converted(to: .celsius).value
             let rh         = h.humidity
             let seaLevelPa = h.pressure.converted(to: .newtonsPerMetersSquared).value
             let altitudeM  = location.altitude
             let stationPa  = seaLevelPa * pow(
                 1 - 0.0065 * altitudeM / (tempC + 0.0065 * altitudeM + 273.15), -5.257)
-            let wetF       = PsychrometryCalculator.psych(pressurePa: stationPa,
+            let wetF       = PsychrometryCalculator.psychF(pressurePa: stationPa,
                                                            dryBulbFahrenheit: tempF,
                                                            relativeHumidity: rh)
+            let wetC       = PsychrometryCalculator.psychC(pressurePa: stationPa,
+                                                           dryBulbCelsius: tempC,
+                                                           relativeHumidity: rh)
             let windMPH    = h.wind.speed.converted(to: .milesPerHour).value
+            let windKPH    = h.wind.speed.converted(to: .kilometersPerHour).value
             let precipMM   = h.precipitationAmount.converted(to: .millimeters).value
 
             // cloudCoverByAltitude: available in WeatherKit on iOS 18+.
@@ -136,12 +143,17 @@ final class WeatherService: ObservableObject {
                 isDaylight:           h.isDaylight,
                 uvIndex:              Double(h.uvIndex.value),
                 temperatureF:         tempF,
+                temperatureC:         tempC,
                 apparentTemperatureF: apparentF,
+                apparentTemperatureC: apparentC,
                 wetBulbF:             wetF,
+                wetBulbC:             wetC,
                 dewPointF:            dewF,
+                dewPointC:            dewC,
                 precipProbability:    Double(h.precipitationChance),
                 precipitationMM:      precipMM,
                 windSpeedMPH:         windMPH,
+                windSpeedKPH:         windKPH,
                 cloudCover:           h.cloudCover,
                 cloudCoverLow:        cloudLow,
                 cloudCoverMedium:     cloudMid,
@@ -150,15 +162,22 @@ final class WeatherService: ObservableObject {
         }
     }
 
-    func loadFor(location: CLLocation, now: Date = .now) async {
+    func loadFor(location: CLLocation, now: Date = .now, preserveData: Bool = false) async {
+        // Only keep existing data visible when there is actually data to show.
+        let shouldPreserve = preserveData && !series24h.isEmpty
         loadGeneration += 1
         let gen = loadGeneration
 
+        isRefreshing     = false           // cancel any prior refresh indicator
         lastErrorMessage = nil
         loadProgress     = LoadProgress()
-        placeDescription = ""
-        series24h        = []
-        series10d        = []
+        if shouldPreserve {
+            isRefreshing = true            // keep existing data; show spinner above content
+        } else {
+            placeDescription = ""
+            series24h        = []
+            series10d        = []
+        }
         finish(.location)
         start(.weather)
 
@@ -174,6 +193,7 @@ final class WeatherService: ObservableObject {
                                    end: now.addingTimeInterval(24 * 3600), location: location)
             series10d = mapPoints(from: hours, start: now,
                                    end: now.addingTimeInterval(240 * 3600), location: location)
+            isRefreshing = false           // new data is in; hide spinner
 
             guard loadGeneration == gen else { return }
             start(.geocode)
@@ -208,6 +228,7 @@ final class WeatherService: ObservableObject {
             }
         } catch {
             guard loadGeneration == gen else { return }
+            isRefreshing = false
             if case .inProgress = loadProgress.steps[.geocode] {
                 fail(.geocode, error: error)
             } else if case .inProgress = loadProgress.steps[.weather] {

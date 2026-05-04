@@ -16,6 +16,14 @@ struct EditPlacesView: View {
         List {
             ForEach(viewModel.places) { place in
                 HStack(spacing: 12) {
+                    Button(role: .destructive) {
+                        viewModel.remove(place)
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+
                     Button {
                         editingPlace = place
                         showEditor   = true
@@ -28,14 +36,6 @@ struct EditPlacesView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(role: .destructive) {
-                        viewModel.remove(place)
-                    } label: {
-                        Image(systemName: "trash")
-                            .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
                 }

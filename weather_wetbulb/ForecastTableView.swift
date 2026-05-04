@@ -3,6 +3,7 @@ import SwiftUI
 struct ForecastTableView: View {
     @ObservedObject var weatherService: WeatherService
     var nowTick: Date
+    var onRefresh: (() async -> Void)? = nil
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private static let timeFormatter: DateFormatter = {
@@ -101,6 +102,7 @@ struct ForecastTableView: View {
                     }
                     .frame(minWidth: totalWidth)
                 }
+                .refreshable { await onRefresh?() }
             }
         }
     }

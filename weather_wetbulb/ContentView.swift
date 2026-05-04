@@ -178,32 +178,49 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 VStack(spacing: 0) {
                     tabLabel("24 hour forecast")
+                    if weather.isRefreshing {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                    }
                     HereTodayView(
                         series: weather.series24h,
                         progress: weather.loadProgress,
                         nowTick: nowTick,
                         errorMessage: weather.lastErrorMessage,
                         attribution: weather.attribution,
-                        onRefresh: { await loadWeather() }
+                        onRefresh: { await loadWeather(preserveData: true) }
                     )
                 }
                 .tag(0)
 
                 VStack(spacing: 0) {
                     tabLabel("10 day forecast")
+                    if weather.isRefreshing {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                    }
                     TenDayView(
                         series: weather.series10d,
                         progress: weather.loadProgress,
                         nowTick: nowTick,
                         errorMessage: weather.lastErrorMessage,
-                        attribution: weather.attribution
+                        attribution: weather.attribution,
+                        onRefresh: { await loadWeather(preserveData: true) }
                     )
                 }
                 .tag(1)
 
                 VStack(spacing: 0) {
                     tabLabel("table")
-                    ForecastTableView(weatherService: weather, nowTick: nowTick)
+                    if weather.isRefreshing {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                    }
+                    ForecastTableView(
+                        weatherService: weather,
+                        nowTick: nowTick,
+                        onRefresh: { await loadWeather(preserveData: true) }
+                    )
                 }
                 .tag(2)
             }
@@ -283,11 +300,11 @@ struct ContentView: View {
         Divider()
     }
 
-    private func loadWeather() async {
+    private func loadWeather(preserveData: Bool = false) async {
         if let place = selectedPlace {
-            await weather.loadFor(location: place.clLocation)
+            await weather.loadFor(location: place.clLocation, preserveData: preserveData)
         } else if let loc = locationProvider.currentLocation {
-            await weather.loadFor(location: loc)
+            await weather.loadFor(location: loc, preserveData: preserveData)
         } else {
             locationProvider.requestLocation()
         }
@@ -441,6 +458,7 @@ struct TenDayView: View {
     var nowTick: Date = .now
     var errorMessage: String? = nil
     var attribution: WeatherAttributionInfo? = nil
+    var onRefresh: (() async -> Void)? = nil
 
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
@@ -495,6 +513,7 @@ struct TenDayView: View {
                     .frame(minHeight: h)
                 }
             }
+            .refreshable { await onRefresh?() }
         }
     }
 

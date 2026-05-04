@@ -16,9 +16,6 @@ struct EditPlacesView: View {
         List {
             ForEach(viewModel.places) { place in
                 HStack(spacing: 12) {
-                    Image(systemName: "line.3.horizontal")
-                        .foregroundStyle(.tertiary)
-
                     Button {
                         editingPlace = place
                         showEditor   = true
@@ -43,9 +40,10 @@ struct EditPlacesView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .onMove { viewModel.move(from: $0, to: $1) }
         }
+        .environment(\.editMode, .constant(.active))
         .navigationTitle("Edit places")
-        // EditButton removed — drag handles come from .environment(\.editMode, .constant(.active))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { addingNew = true } label: { Image(systemName: "plus") }

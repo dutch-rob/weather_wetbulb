@@ -23,8 +23,11 @@ struct PlacesListView: View {
             isDaylight:           nearest.isDaylight,
             uvIndex:              nearest.uvIndex,
             temperatureF:         nearest.temperatureF,
+            temperatureC:         nearest.temperatureC,
             apparentTemperatureF: nearest.apparentTemperatureF,
+            apparentTemperatureC: nearest.apparentTemperatureC,
             windSpeedMPH:         nearest.windSpeedMPH,
+            windSpeedKPH:         nearest.windSpeedKPH,
             precipitationMM:      nearest.precipitationMM,
             precipChance:         nearest.precipProbability,
             fetchedAt:            now
@@ -109,6 +112,8 @@ struct PlaceRowView: View {
     let altitude: Double?
     let snapshot: PlaceWeatherSnapshot?
 
+    @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
+
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             // Left column: name + coordinates
@@ -136,14 +141,18 @@ struct PlaceRowView: View {
                         .frame(width: 28)
 
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text(String(format: "%.0f (%.0f)°F", snap.temperatureF, snap.apparentTemperatureF))
+                        Text(useFahrenheit
+                            ? String(format: "%.0f (%.0f)°F", snap.temperatureF, snap.apparentTemperatureF)
+                            : String(format: "%.0f (%.0f)°C", snap.temperatureC, snap.apparentTemperatureC))
                             .font(.callout)
                             .fontWeight(.medium)
                             .foregroundStyle(.primary)
 
                         HStack(spacing: 8) {
                             Text(String(format: "UV %d", Int(snap.uvIndex)))
-                            Text(String(format: "%.0f mph", snap.windSpeedMPH))
+                            Text(useFahrenheit
+                                ? String(format: "%.0f mph", snap.windSpeedMPH)
+                                : String(format: "%.0f kph", snap.windSpeedKPH))
                             Text(precipText(snap))
                         }
                         .font(.caption2)

@@ -4,7 +4,7 @@ generate_infoview.py
 
 Reads the section of README.md between <!-- INFO_SCREEN_START --> and
 <!-- INFO_SCREEN_END -->, parses it as simple Markdown, and regenerates
-workout_aicode/InfoView.swift.
+weather_wetbulb/InfoView.swift.
 
 Usage (from the repo root):
     python3 generate_infoview.py
@@ -244,7 +244,7 @@ def generate(items: list) -> str:
 def main():
     root = Path(__file__).parent
     readme   = root / "README.md"
-    infoview = root / "workout_aicode" / "InfoView.swift"
+    infoview = root / "weather_wetbulb" / "InfoView.swift"
 
     md = readme.read_text(encoding="utf-8")
     section = extract_section(md)

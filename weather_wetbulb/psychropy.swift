@@ -131,7 +131,7 @@ enum PsychrometryCalculator {
     }
 
     /// Wet-bulb temperature in degF.
-    static func psych(
+    static func psychF(
         pressurePa: Double,
         dryBulbFahrenheit: Double,
         relativeHumidity: Double
@@ -144,6 +144,21 @@ enum PsychrometryCalculator {
             pressure: pressureKPa
         )
         return 1.8 * wetBulbCelsius + 32.0
+    }
+
+    /// Wet-bulb temperature in degC.
+    static func psychC(
+        pressurePa: Double,
+        dryBulbCelsius: Double,
+        relativeHumidity: Double
+    ) -> Double {
+        let pressureKPa = pressurePa / 1000.0
+        let wetBulbCelsius = wetBulb(
+            dryBulb: dryBulbCelsius,
+            relativeHumidity: relativeHumidity,
+            pressure: pressureKPa
+        )
+        return wetBulbCelsius
     }
 
     private static func normalizedRelativeHumidity(_ value: Double) -> Double {
@@ -190,7 +205,7 @@ struct PsychropyView: View {
             return
         }
 
-        let wetBulbFahrenheit = PsychrometryCalculator.psych(
+        let wetBulbFahrenheit = PsychrometryCalculator.psychF(
             pressurePa: pressurePa,
             dryBulbFahrenheit: dryBulbFahrenheit,
             relativeHumidity: relativeHumidity

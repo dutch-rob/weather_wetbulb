@@ -66,7 +66,7 @@ struct ForecastTableView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if weatherService.series10d.isEmpty {
+            if weatherService.series10d.isEmpty || weatherService.isRefreshing {
                 ForecastLoadingView(
                     progress: weatherService.loadProgress,
                     nowTick: nowTick,

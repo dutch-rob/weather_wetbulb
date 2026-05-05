@@ -75,10 +75,14 @@ final class PlacesViewModel: ObservableObject {
     private var lastRefresh: Date?
 
     private static let defaults: [Place] = [
-        Place(name: "Irvine",       latitude:  33.6846, longitude: -117.8265),
-        Place(name: "Yucca Valley", latitude:  34.1142, longitude: -116.4322),
-        Place(name: "Soest",        latitude:  52.1733, longitude:   5.2917),
-        Place(name: "New York",     latitude:  40.7128, longitude:  -74.0060)
+        Place(name: "Phoenix, AZ",        latitude:  33.4484, longitude: -112.0740, altitude:  331),
+        Place(name: "Albuquerque, NM",    latitude:  35.0844, longitude: -106.6504, altitude: 1510),
+        Place(name: "Las Vegas, NV",      latitude:  36.1699, longitude: -115.1398, altitude:  620),
+        Place(name: "Salt Lake City, UT", latitude:  40.7608, longitude: -111.8910, altitude: 1288),
+        Place(name: "Adelaide",           latitude: -34.9285, longitude:  138.6007, altitude:   50),
+        Place(name: "Ankara",             latitude:  39.9334, longitude:   32.8597, altitude:  938),
+        Place(name: "New Delhi",          latitude:  28.6139, longitude:   77.2090, altitude:  216),
+        Place(name: "Cairo",              latitude:  30.0444, longitude:   31.2357, altitude:   23)
     ]
 
     init() {

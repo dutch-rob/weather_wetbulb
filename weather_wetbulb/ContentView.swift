@@ -303,11 +303,8 @@ struct ContentView: View {
     private var hereTodayTab: some View {
         VStack(spacing: 0) {
             tabLabel("24 hour forecast")
-            if weather.isRefreshing {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 28)
-            }
             HereTodayView(
-                series: weather.series24h,
+                series: weather.isRefreshing ? [] : weather.series24h,
                 progress: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
@@ -320,11 +317,8 @@ struct ContentView: View {
     private var tenDayTab: some View {
         VStack(spacing: 0) {
             tabLabel("10 day forecast")
-            if weather.isRefreshing {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 28)
-            }
             TenDayView(
-                series: weather.series10d,
+                series: weather.isRefreshing ? [] : weather.series10d,
                 progress: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
@@ -337,9 +331,6 @@ struct ContentView: View {
     private var forecastTableTab: some View {
         VStack(spacing: 0) {
             tabLabel("table")
-            if weather.isRefreshing {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 28)
-            }
             ForecastTableView(
                 weatherService: weather,
                 nowTick: nowTick,

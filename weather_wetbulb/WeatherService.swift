@@ -95,6 +95,7 @@ final class WeatherService: ObservableObject {
     @Published var lastErrorMessage: String? = nil
     @Published var attribution: WeatherAttributionInfo? = nil
     @Published var isRefreshing: Bool = false
+    @Published var lastFetchedAt: Date? = nil
 
     private var loadGeneration = 0
 
@@ -193,7 +194,8 @@ final class WeatherService: ObservableObject {
                                    end: now.addingTimeInterval(24 * 3600), location: location)
             series10d = mapPoints(from: hours, start: now,
                                    end: now.addingTimeInterval(240 * 3600), location: location)
-            isRefreshing = false           // new data is in; hide spinner
+            isRefreshing  = false          // new data is in; hide spinner
+            lastFetchedAt = Date()
 
             guard loadGeneration == gen else { return }
             start(.geocode)

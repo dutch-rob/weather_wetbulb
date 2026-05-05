@@ -150,8 +150,11 @@ struct ContentView: View {
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var showPlaces = false
     @State private var showInfo   = false
-    @State private var selectedTab = 0
+    // Tab indices: 0 = table phantom, 1 = 24h (real), 2 = 10d (real),
+    //              3 = table (real), 4 = 24h phantom  — for circular wrap.
+    @State private var selectedTab = 1
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
+    @Environment(\.scenePhase) private var scenePhase
 
     private var displayTitle: String {
         if let name = selectedPlace?.name { return name }
@@ -174,57 +177,28 @@ struct ContentView: View {
 
             Divider()
 
-            // Line 2 (tab subtitle) + content swipe as one unit
+            // 5-tab layout for circular (wrap-around) swiping:
+            //   0 = table phantom  →  real tab is 3
+            //   1 = 24h (real, default)
+            //   2 = 10d (real)
+            //   3 = table (real)
+            //   4 = 24h phantom  →  real tab is 1
+            // Phantoms show identical content; onChange teleports to the real
+            // tab instantly (no animation) so the user never notices the jump.
             TabView(selection: $selectedTab) {
-                VStack(spacing: 0) {
-                    tabLabel("24 hour forecast")
-                    if weather.isRefreshing {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, minHeight: 28)
-                    }
-                    HereTodayView(
-                        series: weather.series24h,
-                        progress: weather.loadProgress,
-                        nowTick: nowTick,
-                        errorMessage: weather.lastErrorMessage,
-                        attribution: weather.attribution,
-                        onRefresh: { await loadWeather(preserveData: true) }
-                    )
-                }
-                .tag(0)
-
-                VStack(spacing: 0) {
-                    tabLabel("10 day forecast")
-                    if weather.isRefreshing {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, minHeight: 28)
-                    }
-                    TenDayView(
-                        series: weather.series10d,
-                        progress: weather.loadProgress,
-                        nowTick: nowTick,
-                        errorMessage: weather.lastErrorMessage,
-                        attribution: weather.attribution,
-                        onRefresh: { await loadWeather(preserveData: true) }
-                    )
-                }
-                .tag(1)
-
-                VStack(spacing: 0) {
-                    tabLabel("table")
-                    if weather.isRefreshing {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, minHeight: 28)
-                    }
-                    ForecastTableView(
-                        weatherService: weather,
-                        nowTick: nowTick,
-                        onRefresh: { await loadWeather(preserveData: true) }
-                    )
-                }
-                .tag(2)
+                forecastTableTab.tag(0)
+                hereTodayTab.tag(1)
+                tenDayTab.tag(2)
+                forecastTableTab.tag(3)
+                hereTodayTab.tag(4)
             }
             .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .onChange(of: selectedTab) { _, tab in
+                guard tab == 0 || tab == 4 else { return }
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) { selectedTab = tab == 0 ? 3 : 1 }
+            }
         }
         .safeAreaInset(edge: .bottom) {
             ZStack {
@@ -280,7 +254,21 @@ struct ContentView: View {
             .presentationDetents([.large])
         }
         .onReceive(locationProvider.$currentLocation.compactMap { $0 }) { loc in
-            if selectedPlace == nil { Task { await weather.loadFor(location: loc) } }
+            // Only fire on a location update when there is no data yet.
+            // Prevents this from racing with pull-to-refresh or the
+            // foreground auto-refresh and invalidating their loadGeneration.
+            if selectedPlace == nil && weather.series24h.isEmpty {
+                Task { await weather.loadFor(location: loc) }
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            // Auto-refresh when returning from background if data is ≥ 30 min old.
+            if let fetched = weather.lastFetchedAt,
+               Date().timeIntervalSince(fetched) > 1800,
+               !weather.isRefreshing {
+                Task { await loadWeather(preserveData: true) }
+            }
         }
         .task {
             await loadWeather()
@@ -307,6 +295,56 @@ struct ContentView: View {
             await weather.loadFor(location: loc, preserveData: preserveData)
         } else {
             locationProvider.requestLocation()
+        }
+    }
+
+    // MARK: Tab content (used for both real and phantom tabs)
+
+    private var hereTodayTab: some View {
+        VStack(spacing: 0) {
+            tabLabel("24 hour forecast")
+            if weather.isRefreshing {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 28)
+            }
+            HereTodayView(
+                series: weather.series24h,
+                progress: weather.loadProgress,
+                nowTick: nowTick,
+                errorMessage: weather.lastErrorMessage,
+                attribution: weather.attribution,
+                onRefresh: { await loadWeather(preserveData: true) }
+            )
+        }
+    }
+
+    private var tenDayTab: some View {
+        VStack(spacing: 0) {
+            tabLabel("10 day forecast")
+            if weather.isRefreshing {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 28)
+            }
+            TenDayView(
+                series: weather.series10d,
+                progress: weather.loadProgress,
+                nowTick: nowTick,
+                errorMessage: weather.lastErrorMessage,
+                attribution: weather.attribution,
+                onRefresh: { await loadWeather(preserveData: true) }
+            )
+        }
+    }
+
+    private var forecastTableTab: some View {
+        VStack(spacing: 0) {
+            tabLabel("table")
+            if weather.isRefreshing {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 28)
+            }
+            ForecastTableView(
+                weatherService: weather,
+                nowTick: nowTick,
+                onRefresh: { await loadWeather(preserveData: true) }
+            )
         }
     }
 }

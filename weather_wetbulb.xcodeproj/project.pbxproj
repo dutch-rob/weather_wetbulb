@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		15DD2E872FA82B0B0058B790 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 15DD2E862FA82B0B0058B790 /* README.md */; };
 		15DD2E892FA82B230058B790 /* generate_infoview.py in Resources */ = {isa = PBXBuildFile; fileRef = 15DD2E882FA82B230058B790 /* generate_infoview.py */; };
+		15DD2E8D2FAAB1AC0058B790 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 15DD2E8C2FAAB1AC0058B790 /* LICENSE */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,6 +35,7 @@
 		154C7E862F71BD170016AE49 /* weather_wetbulbUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = weather_wetbulbUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		15DD2E862FA82B0B0058B790 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		15DD2E882FA82B230058B790 /* generate_infoview.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = generate_infoview.py; sourceTree = "<group>"; };
+		15DD2E8C2FAAB1AC0058B790 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,6 +90,7 @@
 				154C7E6E2F71BD120016AE49 /* Products */,
 				15DD2E862FA82B0B0058B790 /* README.md */,
 				15DD2E882FA82B230058B790 /* generate_infoview.py */,
+				15DD2E8C2FAAB1AC0058B790 /* LICENSE */,
 			);
 			sourceTree = "<group>";
 		};
@@ -223,6 +226,7 @@
 			files = (
 				15DD2E892FA82B230058B790 /* generate_infoview.py in Resources */,
 				15DD2E872FA82B0B0058B790 /* README.md in Resources */,
+				15DD2E8D2FAAB1AC0058B790 /* LICENSE in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,6 +419,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "weather-wetbulb-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCast;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -451,6 +457,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "weather-wetbulb-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCast;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

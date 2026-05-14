@@ -43,7 +43,14 @@ struct ForecastPoint: Identifiable {
         guard let state else {
             myFeelsLikeC = nil; myFeelsLikeF = nil; return
         }
-        let c = state.predict(ForecastFeatureSource(p: self, scenario: scenario))
+        // Leverage-weighted blend between model and apparent temperature.
+        // For in-range forecasts this is just the model; far-out-of-range
+        // forecasts smoothly fall back to apparent so we never display a
+        // wildly extrapolated personalised number.
+        let (c, _) = state.blendedPredictionC(
+            ForecastFeatureSource(p: self, scenario: scenario),
+            apparentC: apparentTemperatureC
+        )
         myFeelsLikeC = c
         myFeelsLikeF = TempUnit.cToF(c)
     }

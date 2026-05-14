@@ -144,7 +144,15 @@ struct RegressionState: Codable {
     var ratingCount: Int
     var lastFitAt: Date
 
-    /// Predicted feels-like (°C) for a feature source.
+    /// Inverse of the standardised normal-equations matrix (X'X)⁻¹ —
+    /// the m × m matrix where m = selectedFeatures.count + 1 (intercept).
+    /// Used to compute leverage / extrapolation diagnostics.
+    /// Optional only so we can decode pre-leverage saved states;
+    /// new fits always populate it.
+    var invXtX: [[Double]]? = nil
+
+    /// Predicted feels-like (°C) for a feature source, using the fitted model
+    /// without any extrapolation handling.
     func predict(_ src: FeatureSource) -> Double {
         var y = coefficients[0]
         for (i, f) in selectedFeatures.enumerated() {
@@ -152,6 +160,71 @@ struct RegressionState: Codable {
             y += coefficients[i + 1] * xStd
         }
         return y
+    }
+
+    /// Standardised augmented row [1, x₁_std, …, xₚ_std] for a query point.
+    private func augmentedStdRow(_ src: FeatureSource) -> [Double] {
+        let m = selectedFeatures.count + 1
+        var x = [Double](repeating: 0, count: m)
+        x[0] = 1.0
+        for (j, f) in selectedFeatures.enumerated() {
+            x[j + 1] = (src.value(for: f) - means[j]) / stds[j]
+        }
+        return x
+    }
+
+    /// Leverage (hat-matrix diagonal) for a query point.  Returns the
+    /// scalar h = x' (X'X)⁻¹ x, where x is the standardised + intercept
+    /// row for the query.
+    ///
+    ///   • At the centroid of training data h = 1/n (the floor).
+    ///   • Average leverage over training points is m/n.
+    ///   • Large h means the query lies far from training in a way that
+    ///     respects the feature correlation structure (Mahalanobis-like).
+    ///
+    /// Returns nil if invXtX wasn't stored (legacy state); callers should
+    /// then assume the model is in-range.
+    func leverage(_ src: FeatureSource) -> Double? {
+        guard let inv = invXtX else { return nil }
+        let x = augmentedStdRow(src)
+        let m = x.count
+        var h = 0.0
+        for i in 0..<m {
+            var s = 0.0
+            for j in 0..<m { s += inv[i][j] * x[j] }
+            h += x[i] * s
+        }
+        return h
+    }
+
+    /// Continuous extrapolation-aware prediction. Returns a weighted
+    /// average of the model prediction and the apparent temperature,
+    /// where the weight on apparent rises linearly from 0 at h = 2m/n
+    /// to 1 at h = 3m/n.
+    ///
+    ///   • In-range queries  (h ≤ 2m/n)    → pure model.
+    ///   • Borderline range   (2m/n < h < 3m/n) → linear blend.
+    ///   • Out-of-range       (h ≥ 3m/n)    → pure apparent temperature.
+    ///
+    /// `apparentWeight` is the weight given to apparent temperature (0…1)
+    /// and can be used by the UI to flag low-confidence cells.
+    func blendedPredictionC(_ src: FeatureSource, apparentC: Double)
+        -> (value: Double, apparentWeight: Double)
+    {
+        let modelValue = predict(src)
+        guard let h = leverage(src) else {
+            return (modelValue, 0.0)
+        }
+        let mD = Double(selectedFeatures.count + 1)
+        let nD = Double(ratingCount)
+        guard nD > 0 else { return (modelValue, 0.0) }
+        let lower = 2.0 * mD / nD
+        let upper = 3.0 * mD / nD
+        let w: Double
+        if h <= lower      { w = 0 }
+        else if h >= upper { w = 1 }
+        else               { w = (h - lower) / (upper - lower) }
+        return (modelValue * (1 - w) + apparentC * w, w)
     }
 }
 
@@ -263,7 +336,17 @@ enum FeelsLikeRegression {
             for b in 0..<a { XtX[a][b] = XtX[b][a] }
         }
 
-        guard let beta = solveSPD(XtX, Xty) else { return nil }
+        guard let L = cholesky(XtX) else { return nil }
+        let beta = cholSolve(L: L, b: Xty)
+
+        // Inverse of XtX via repeated solves on unit vectors — reused for
+        // leverage at inference time.
+        var inv = Array(repeating: Array(repeating: 0.0, count: m), count: m)
+        for j in 0..<m {
+            var e = Array(repeating: 0.0, count: m); e[j] = 1
+            let col = cholSolve(L: L, b: e)
+            for i in 0..<m { inv[i][j] = col[i] }
+        }
 
         // Residuals → R² and AICc.
         var rss = 0.0
@@ -293,15 +376,16 @@ enum FeelsLikeRegression {
             rSquared: r2,
             aicc: aicc,
             ratingCount: n,
-            lastFitAt: Date()
+            lastFitAt: Date(),
+            invXtX: inv
         )
     }
 
     // MARK: - Cholesky on a symmetric positive-definite system
 
-    /// Solve A x = b where A is symmetric positive-definite (m × m).
-    /// Returns nil if A is not PD (numerically singular).
-    static func solveSPD(_ A: [[Double]], _ b: [Double]) -> [Double]? {
+    /// Cholesky factor: returns lower-triangular L such that L L' = A.
+    /// nil if A is not numerically positive-definite.
+    static func cholesky(_ A: [[Double]]) -> [[Double]]? {
         let m = A.count
         var L = Array(repeating: Array(repeating: 0.0, count: m), count: m)
         for i in 0..<m {
@@ -316,6 +400,12 @@ enum FeelsLikeRegression {
                 }
             }
         }
+        return L
+    }
+
+    /// Given Cholesky factor L (L L' = A), solve A x = b for x.
+    static func cholSolve(L: [[Double]], b: [Double]) -> [Double] {
+        let m = L.count
         // Forward solve L y = b
         var ysol = Array(repeating: 0.0, count: m)
         for i in 0..<m {
@@ -332,6 +422,13 @@ enum FeelsLikeRegression {
             x[i] = s / L[i][i]
         }
         return x
+    }
+
+    /// Convenience: one-shot Cholesky solve.  Kept for callers (and the
+    /// regression unit tests) that don't need the factor itself.
+    static func solveSPD(_ A: [[Double]], _ b: [Double]) -> [Double]? {
+        guard let L = cholesky(A) else { return nil }
+        return cholSolve(L: L, b: b)
     }
 }
 

@@ -158,7 +158,11 @@ final class WeatherService: ObservableObject {
                 cloudCover:           h.cloudCover,
                 cloudCoverLow:        cloudLow,
                 cloudCoverMedium:     cloudMid,
-                cloudCoverHigh:       cloudHigh
+                cloudCoverHigh:       cloudHigh,
+                humidity:             rh,
+                stationPressurePa:    stationPa,
+                myFeelsLikeC:         nil,
+                myFeelsLikeF:         nil
             )
         }
     }

@@ -4,6 +4,9 @@ struct ForecastTableView: View {
     @ObservedObject var weatherService: WeatherService
     var nowTick: Date
     var onRefresh: (() async -> Void)? = nil
+    /// Applied to the 10-day series so the leftmost MyFeelsLike column reflects
+    /// the personalised regression model when one exists.
+    var personalise: ([ForecastPoint]) -> [ForecastPoint] = { $0 }
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private static let timeFormatter: DateFormatter = {
@@ -31,7 +34,7 @@ struct ForecastTableView: View {
         var currentKey  = ""
         var currentPts: [ForecastPoint] = []
 
-        for pt in weatherService.series10d {
+        for pt in personalise(weatherService.series10d) {
             let key = Self.dayHeaderFormatter.string(from: pt.date)
             if key != currentKey {
                 if !currentPts.isEmpty {
@@ -50,6 +53,7 @@ struct ForecastTableView: View {
     }
 
     // Column widths
+    private let wMyFL:   CGFloat = 70
     private let wTime:   CGFloat = 48
     private let wSym:    CGFloat = 26
     private let wUV:     CGFloat = 30
@@ -61,7 +65,7 @@ struct ForecastTableView: View {
     private let wCloud:  CGFloat = 150
 
     private var totalWidth: CGFloat {
-        wTime + wSym + wUV + wTemp + wWet + wDew + wWind + wPrecip + wCloud + 16
+        wMyFL + wTime + wSym + wUV + wTemp + wWet + wDew + wWind + wPrecip + wCloud + 16
     }
 
     var body: some View {
@@ -111,6 +115,7 @@ struct ForecastTableView: View {
 
     private var columnHeaderRow: some View {
         HStack(spacing: 0) {
+            cell(useFahrenheit ? "MyFeelsLike °F" : "MyFeelsLike °C", width: wMyFL, align: .trailing, bold: true)
             cell("Time",                                         width: wTime,   align: .leading,  bold: true)
             cell("",                                             width: wSym,    align: .center,   bold: true)
             cell("UV",                                           width: wUV,     align: .trailing, bold: true)
@@ -131,6 +136,8 @@ struct ForecastTableView: View {
 
     private func dataRow(_ p: ForecastPoint) -> some View {
         HStack(spacing: 0) {
+            myFeelsLikeCell(p)
+
             cell(Self.timeFormatter.string(from: p.date), width: wTime, align: .leading)
 
             // Weather condition icon
@@ -149,6 +156,19 @@ struct ForecastTableView: View {
         .font(.caption)
         .padding(.vertical, 3)
         .padding(.horizontal, 8)
+    }
+
+    // MyFeelsLike cell — purple, bold; dimmed (italic) when the regression
+    // model isn't active yet and we're showing apparent temp as a placeholder.
+    @ViewBuilder
+    private func myFeelsLikeCell(_ p: ForecastPoint) -> some View {
+        let value = useFahrenheit ? p.displayMyFeelsLikeF : p.displayMyFeelsLikeC
+        let isPlaceholder = (useFahrenheit ? p.myFeelsLikeF : p.myFeelsLikeC) == nil
+        Text(fmt1(value))
+            .font(.caption.weight(.semibold))
+            .italic(isPlaceholder)
+            .foregroundStyle(.purple.opacity(isPlaceholder ? 0.55 : 1.0))
+            .frame(width: wMyFL, alignment: .trailing)
     }
 
     // MARK: Formatting helpers

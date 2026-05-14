@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct weather_wetbulbApp: App {
@@ -32,5 +33,6 @@ struct weather_wetbulbApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: Rating.self)
     }
 }

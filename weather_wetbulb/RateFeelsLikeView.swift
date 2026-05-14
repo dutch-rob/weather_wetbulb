@@ -5,6 +5,15 @@
 //  Sheet for the user to record one "feels like" rating, captured against
 //  the current weather snapshot at the moment of submission.
 //
+//  Layout: two columns side by side.
+//    Left  — tall, narrow vertical colour bar with draggable thumb +
+//            live value readout underneath.  Fills from just below the
+//            toolbar to the bottom of the safe area.
+//    Right — the "How does it feel right now?" prompt and the three
+//            textual ratings (Activity / Dressed / Sun).  Long hints
+//            (Activity) are hidden behind an ⓘ button that shows a
+//            popover.
+//
 
 import SwiftUI
 import SwiftData
@@ -26,6 +35,9 @@ struct RateFeelsLikeView: View {
     @State private var dress: Int = 0      // nice
     @State private var sun: Int = 0        // partial
 
+    /// Identifies which option's hint popover is currently open (if any).
+    @State private var shownHint: HintID? = nil
+
     init(snapshot: ForecastPoint,
          placeID: UUID?,
          useFahrenheit: Bool) {
@@ -38,17 +50,28 @@ struct RateFeelsLikeView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    promptHeader
+            HStack(alignment: .top, spacing: 0) {
+                // ── Left column: tall colour bar + value readout ──────────
+                VStack(spacing: 8) {
                     colorBar
-                        .frame(height: 280)
-                        .padding(.horizontal, 24)
+                        .frame(maxHeight: .infinity)
                     valueReadout
-                        .frame(maxWidth: .infinity)
-                    questionnaire
                 }
-                .padding()
+                .frame(width: 90)
+                .padding(.leading, 16)
+                .padding(.trailing, 8)
+                .padding(.vertical, 12)
+
+                // ── Right column: prompt + categorical ratings ────────────
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        promptHeader
+                        questionnaire
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .navigationTitle("Rate Feels Like")
             .navigationBarTitleDisplayMode(.inline)
@@ -67,7 +90,7 @@ struct RateFeelsLikeView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("How does it feel right now?")
                 .font(.headline)
-            Text("Drag the marker to the temperature that matches how this weather feels to you.")
+            Text("Drag the marker on the colour bar to the temperature that matches how this weather feels to you.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -79,11 +102,14 @@ struct RateFeelsLikeView: View {
         let secondary = useFahrenheit ? String(format: "%.1f °C", feelsLikeC) : String(format: "%.0f °F", f)
         return VStack(spacing: 2) {
             Text(primary)
-                .font(.title2.weight(.semibold))
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(ColorScale.color(forC: feelsLikeC))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             Text(secondary)
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
     }
 
@@ -92,11 +118,10 @@ struct RateFeelsLikeView: View {
     private var colorBar: some View {
         GeometryReader { geo in
             let h = geo.size.height
-            let w = geo.size.width
+            let barW: CGFloat = 30
 
             // Map current value to vertical position.
             let frac = (feelsLikeC - ColorScale.minC) / (ColorScale.maxC - ColorScale.minC)
-            // Higher temps at the top (gradient end), so y from bottom.
             let y = h * (1 - CGFloat(max(0, min(1, frac))))
 
             ZStack(alignment: .topLeading) {
@@ -108,25 +133,27 @@ struct RateFeelsLikeView: View {
                     }),
                     startPoint: .top, endPoint: .bottom
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: barW, height: h)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 6)
                         .stroke(.gray.opacity(0.3), lineWidth: 0.5)
                 )
 
-                // Tick labels every 5°C (or every 10°F)
-                tickLabels(height: h, width: w)
+                // Tick labels to the right of the bar
+                tickLabels(height: h, barWidth: barW)
 
-                // Indicator thumb
+                // Indicator thumb — slightly wider than the bar
                 Capsule()
                     .fill(.white)
-                    .frame(width: w + 12, height: 4)
+                    .frame(width: barW + 12, height: 4)
                     .overlay(
                         Capsule().stroke(.black.opacity(0.7), lineWidth: 1)
                     )
                     .offset(x: -6, y: y - 2)
                     .shadow(radius: 1)
             }
+            .frame(width: geo.size.width, height: h, alignment: .topLeading)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -140,9 +167,9 @@ struct RateFeelsLikeView: View {
     }
 
     @ViewBuilder
-    private func tickLabels(height: CGFloat, width: CGFloat) -> some View {
+    private func tickLabels(height: CGFloat, barWidth: CGFloat) -> some View {
         let ticks: [Double] = useFahrenheit
-            ? stride(from: -10.0, through: 110.0, by: 10.0).map(TempUnit.fToC) // 10°F steps
+            ? stride(from: -10.0, through: 110.0, by: 10.0).map(TempUnit.fToC)
             : stride(from: -20.0, through: 45.0, by: 5.0).map { $0 }
         ForEach(ticks, id: \.self) { tC in
             let frac = (tC - ColorScale.minC) / (ColorScale.maxC - ColorScale.minC)
@@ -155,12 +182,12 @@ struct RateFeelsLikeView: View {
                     Rectangle().fill(.black.opacity(0.4)).frame(width: 6, height: 1)
                     Text(label).font(.caption2).foregroundStyle(.primary)
                 }
-                .offset(x: width + 4, y: y - 6)
+                .offset(x: barWidth + 4, y: y - 6)
             }
         }
     }
 
-    // MARK: Questionnaire
+    // MARK: Questionnaire (right column)
 
     private var questionnaire: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -206,23 +233,43 @@ struct RateFeelsLikeView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.subheadline.weight(.semibold))
             ForEach(options, id: \.0) { (raw, label, hint) in
-                Button {
-                    value.wrappedValue = raw
-                } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: value.wrappedValue == raw ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(value.wrappedValue == raw ? Color.accentColor : .secondary)
-                            .padding(.top, 1)
-                        VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .center, spacing: 8) {
+                    Button {
+                        value.wrappedValue = raw
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: value.wrappedValue == raw ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(value.wrappedValue == raw ? Color.accentColor : .secondary)
                             Text(label).font(.callout)
-                            if let hint {
-                                Text(hint).font(.caption2).foregroundStyle(.secondary)
-                            }
                         }
-                        Spacer()
                     }
+                    .buttonStyle(.plain)
+
+                    if let hint {
+                        let id = HintID(category: title, value: raw)
+                        Button {
+                            shownHint = (shownHint == id) ? nil : id
+                        } label: {
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .popover(
+                            isPresented: Binding(
+                                get: { shownHint == id },
+                                set: { if !$0 { shownHint = nil } }
+                            ),
+                            arrowEdge: .top
+                        ) {
+                            Text(hint)
+                                .font(.callout)
+                                .padding(12)
+                                .frame(maxWidth: 260)
+                                .presentationCompactAdaptation(.popover)
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -242,4 +289,11 @@ struct RateFeelsLikeView: View {
         try? modelContext.save()
         dismiss()
     }
+}
+
+// MARK: - Helpers
+
+private struct HintID: Hashable {
+    let category: String
+    let value: Int
 }

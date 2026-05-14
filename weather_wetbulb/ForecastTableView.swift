@@ -7,6 +7,9 @@ struct ForecastTableView: View {
     /// Applied to the 10-day series so the leftmost MyFeelsLike column reflects
     /// the personalised regression model when one exists.
     var personalise: ([ForecastPoint]) -> [ForecastPoint] = { $0 }
+    /// Features currently in the regression model. Used to decide which
+    /// scenario adjusters to display (matches the graph screens).
+    var activeFeatures: Set<Feature>? = nil
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private static let timeFormatter: DateFormatter = {
@@ -52,7 +55,7 @@ struct ForecastTableView: View {
         return sections
     }
 
-    // Column widths
+    // Column widths (tweaked for narrower cloud column + extra space after MyFeel)
     private let wMyFL:   CGFloat = 70
     private let wTime:   CGFloat = 48
     private let wSym:    CGFloat = 26
@@ -62,11 +65,25 @@ struct ForecastTableView: View {
     private let wDew:    CGFloat = 55
     private let wWind:   CGFloat = 52
     private let wPrecip: CGFloat = 82
-    private let wCloud:  CGFloat = 150
+    private let wCloud:  CGFloat = 110
+
+    /// Right-padding applied to the MyFeel cell so its numbers sit further
+    /// from the Time column (user-visible: extra breathing room between
+    /// the two leftmost columns).
+    private let myFLTrailingGap: CGFloat = 10
 
     private var totalWidth: CGFloat {
-        wMyFL + wTime + wSym + wUV + wTemp + wWet + wDew + wWind + wPrecip + wCloud + 16
+        wMyFL + myFLTrailingGap + wTime + wSym + wUV + wTemp + wWet + wDew + wWind + wPrecip + wCloud + 16
     }
+
+    // MARK: - 25%-darker variants of the graph colours, used for data text
+
+    private static let cTemp:   Color = .blue.mix(   with: .black, by: 0.25)
+    private static let cWet:    Color = .green.mix(  with: .black, by: 0.25)
+    private static let cDew:    Color = .red.mix(    with: .black, by: 0.25)
+    private static let cWind:   Color = .red.mix(    with: .black, by: 0.25)
+    private static let cPrecip: Color = .blue.mix(   with: .black, by: 0.25)
+    private static let cMyFL:   Color = .purple.mix( with: .black, by: 0.25)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -78,6 +95,9 @@ struct ForecastTableView: View {
                 )
                 .padding()
             } else {
+                // Scenario adjusters (only those that are actually in the model)
+                ScenarioStrip(activeFeatures: activeFeatures)
+
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                         ForEach(daySections) { section in
@@ -111,20 +131,23 @@ struct ForecastTableView: View {
         }
     }
 
-    // MARK: Column header row
+    // MARK: Column header row (two lines allowed)
 
     private var columnHeaderRow: some View {
         HStack(spacing: 0) {
-            cell(useFahrenheit ? "MyFeelsLike °F" : "MyFeelsLike °C", width: wMyFL, align: .trailing, bold: true)
-            cell("Time",                                         width: wTime,   align: .leading,  bold: true)
-            cell("",                                             width: wSym,    align: .center,   bold: true)
-            cell("UV",                                           width: wUV,     align: .trailing, bold: true)
-            cell(useFahrenheit ? "Temp/feels °F" : "Temp/feels °C", width: wTemp, align: .trailing, bold: true)
-            cell(useFahrenheit ? "Wet bulb °F"   : "Wet bulb °C",   width: wWet,  align: .trailing, bold: true)
-            cell(useFahrenheit ? "Dew Pt °F"     : "Dew Pt °C",     width: wDew,  align: .trailing, bold: true)
-            cell(useFahrenheit ? "Wind mph"       : "Wind kph",      width: wWind, align: .trailing, bold: true)
-            cell("Precip (%)",                                   width: wPrecip, align: .trailing, bold: true)
-            cell("Cloud (%)",                                    width: wCloud,  align: .trailing, bold: true)
+            // Force the line break after "MyFeels".
+            headerCell("MyFeels\nLike " + (useFahrenheit ? "°F" : "°C"),
+                       width: wMyFL, align: .trailing)
+                .padding(.trailing, myFLTrailingGap)
+            headerCell("Time",                                              width: wTime,  align: .leading)
+            headerCell("",                                                  width: wSym,   align: .center)
+            headerCell("UV",                                                width: wUV,    align: .trailing)
+            headerCell("Temp /\nfeels " + (useFahrenheit ? "°F" : "°C"),    width: wTemp,  align: .trailing)
+            headerCell("Wet\nbulb " + (useFahrenheit ? "°F" : "°C"),        width: wWet,   align: .trailing)
+            headerCell("Dew\npt " + (useFahrenheit ? "°F" : "°C"),          width: wDew,   align: .trailing)
+            headerCell("Wind\n" + (useFahrenheit ? "mph" : "kph"),          width: wWind,  align: .trailing)
+            headerCell("Precip\n(%)",                                       width: wPrecip, align: .trailing)
+            headerCell("Cloud\n(%)",                                        width: wCloud,  align: .trailing)
         }
         .font(.caption)
         .padding(.vertical, 6)
@@ -132,11 +155,30 @@ struct ForecastTableView: View {
         .background(.bar)
     }
 
+    @ViewBuilder
+    private func headerCell(_ text: String, width: CGFloat, align: Alignment) -> some View {
+        Text(text)
+            .fontWeight(.semibold)
+            .multilineTextAlignment(textAlignment(for: align))
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: width, alignment: align)
+    }
+
+    private func textAlignment(for align: Alignment) -> TextAlignment {
+        switch align {
+        case .leading:  return .leading
+        case .trailing: return .trailing
+        default:        return .center
+        }
+    }
+
     // MARK: Data row
 
     private func dataRow(_ p: ForecastPoint) -> some View {
         HStack(spacing: 0) {
             myFeelsLikeCell(p)
+                .padding(.trailing, myFLTrailingGap)
 
             cell(Self.timeFormatter.string(from: p.date), width: wTime, align: .leading)
 
@@ -145,13 +187,13 @@ struct ForecastTableView: View {
                 .font(.caption)
                 .frame(width: wSym, alignment: .center)
 
-            cell(fmtUV(p.uvIndex),                                              width: wUV,   align: .trailing)
-            cell(fmtTemp(p),                                                    width: wTemp, align: .trailing)
-            cell(fmt1(useFahrenheit ? p.wetBulbF    : p.wetBulbC),             width: wWet,  align: .trailing)
-            cell(fmt1(useFahrenheit ? p.dewPointF   : p.dewPointC),            width: wDew,  align: .trailing)
-            cell(fmt1(useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),        width: wWind, align: .trailing)
-            cell(fmtPrecip(p),        width: wPrecip, align: .trailing)
-            cell(fmtCloud(p),         width: wCloud,  align: .trailing)
+            cell(fmtUV(p.uvIndex),                                       width: wUV,    align: .trailing)
+            cell(fmtTemp(p),                                             width: wTemp,  align: .trailing, color: Self.cTemp)
+            cell(fmt1(useFahrenheit ? p.wetBulbF    : p.wetBulbC),       width: wWet,   align: .trailing, color: Self.cWet)
+            cell(fmt1(useFahrenheit ? p.dewPointF   : p.dewPointC),      width: wDew,   align: .trailing, color: Self.cDew)
+            cell(fmt1(useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),  width: wWind,  align: .trailing, color: Self.cWind)
+            cell(fmtPrecip(p),  width: wPrecip, align: .trailing, color: Self.cPrecip)
+            cell(fmtCloud(p),   width: wCloud,  align: .trailing)
         }
         .font(.caption)
         .padding(.vertical, 3)
@@ -167,7 +209,7 @@ struct ForecastTableView: View {
         Text(fmt1(value))
             .font(.caption.weight(.semibold))
             .italic(isPlaceholder)
-            .foregroundStyle(.purple.opacity(isPlaceholder ? 0.55 : 1.0))
+            .foregroundStyle(Self.cMyFL.opacity(isPlaceholder ? 0.55 : 1.0))
             .frame(width: wMyFL, alignment: .trailing)
     }
 
@@ -197,9 +239,14 @@ struct ForecastTableView: View {
     // MARK: Layout helpers
 
     @ViewBuilder
-    private func cell(_ text: String, width: CGFloat, align: Alignment, bold: Bool = false) -> some View {
+    private func cell(
+        _ text: String,
+        width: CGFloat,
+        align: Alignment,
+        color: Color? = nil
+    ) -> some View {
         Text(text)
-            .fontWeight(bold ? .semibold : .regular)
+            .foregroundStyle(color ?? .primary)
             .frame(width: width, alignment: align)
             .lineLimit(1)
     }

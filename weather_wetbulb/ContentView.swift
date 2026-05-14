@@ -187,6 +187,13 @@ struct ContentView: View {
         Scenario(activity: scenarioActivity, dress: scenarioDress, sun: scenarioSun)
     }
 
+    /// Features currently in the model.  Used to decide which scenario
+    /// adjusters to show — only those that actually influence the
+    /// prediction are exposed to the user.  Empty when no model is fit yet.
+    private var activeFeatures: Set<Feature> {
+        Set(regressionState?.selectedFeatures ?? [])
+    }
+
     private func personalised(_ series: [ForecastPoint]) -> [ForecastPoint] {
         guard regressionState != nil else { return series }
         let s = regressionState
@@ -362,7 +369,8 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true) }
+                onRefresh: { await loadWeather(preserveData: true) },
+                activeFeatures: activeFeatures
             )
         }
     }
@@ -376,7 +384,8 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true) }
+                onRefresh: { await loadWeather(preserveData: true) },
+                activeFeatures: activeFeatures
             )
         }
     }
@@ -388,7 +397,8 @@ struct ContentView: View {
                 weatherService: weather,
                 nowTick: nowTick,
                 onRefresh: { await loadWeather(preserveData: true) },
-                personalise: { self.personalised($0) }
+                personalise: { self.personalised($0) },
+                activeFeatures: activeFeatures
             )
         }
     }
@@ -403,6 +413,9 @@ struct HereTodayView: View {
     var errorMessage: String? = nil
     var attribution: WeatherAttributionInfo? = nil
     var onRefresh: (() async -> Void)? = nil
+    /// Features currently in the regression model. Used to decide which
+    /// scenario adjusters to show. Empty = no model, no chips shown.
+    var activeFeatures: Set<Feature> = []
 
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
@@ -432,7 +445,7 @@ struct HereTodayView: View {
                         .frame(minHeight: h)
                 } else {
                     VStack(spacing: 8) {
-                        ScenarioStrip()
+                        ScenarioStrip(activeFeatures: activeFeatures)
                         temperatureChart(height: h * 0.55)
                         precipWindChart(height: h * 0.36)
                         if let attribution {
@@ -450,13 +463,14 @@ struct HereTodayView: View {
     @ViewBuilder
     private func temperatureChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
+            // Legend without units — units are shown on the y-axis instead.
             ChartLegendRow(entries: [
-                (.purple, useFahrenheit ? "MyFeelsLike °F" : "MyFeelsLike °C", false),
-                (.blue,   useFahrenheit ? "Temp °F"        : "Temp °C",        false),
-                (.green,  useFahrenheit ? "Wet Bulb °F"    : "Wet Bulb °C",    false),
-                (.red,    useFahrenheit ? "Dew Pt °F"      : "Dew Pt °C",      false)
+                (.purple, "MyFeelsLike", false),
+                (.blue,   "Temp",        false),
+                (.green,  "Wet Bulb",    false),
+                (.red,    "Dew Pt",      false)
             ])
-            .padding(.leading, 8)
+            .padding(.leading, 36)   // start near the y-axis line, not the y-axis labels
 
             Chart(series) { p in
                 LineMark(x: .value("Time", p.date),
@@ -498,6 +512,15 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            // Unit annotation just below the topmost y-axis number, in-plot
+            // (so the chart area does not need to shrink to make room).
+            .overlay(alignment: .topLeading) {
+                Text(useFahrenheit ? "°F" : "°C")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+                    .padding(.top, 14)
+            }
             .frame(height: height - 20)
         }
     }
@@ -509,7 +532,7 @@ struct HereTodayView: View {
                 (.blue, "Precip %",                               true),
                 (.red,  useFahrenheit ? "Wind mph" : "Wind kph",  false)
             ])
-            .padding(.leading, 8)
+            .padding(.leading, 36)
 
             Chart(series) { p in
                 AreaMark(x: .value("Time", p.date),
@@ -552,6 +575,9 @@ struct TenDayView: View {
     var errorMessage: String? = nil
     var attribution: WeatherAttributionInfo? = nil
     var onRefresh: (() async -> Void)? = nil
+    /// Features currently in the regression model. Used to decide which
+    /// scenario adjusters to show. Empty = no model, no chips shown.
+    var activeFeatures: Set<Feature> = []
 
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
@@ -596,7 +622,7 @@ struct TenDayView: View {
                         .frame(minHeight: h)
                 } else {
                     VStack(spacing: 8) {
-                        ScenarioStrip()
+                        ScenarioStrip(activeFeatures: activeFeatures)
                         temperatureChart(height: h * 0.55)
                         precipWindChart(height: h * 0.36)
                         if let attribution {
@@ -614,13 +640,14 @@ struct TenDayView: View {
     @ViewBuilder
     private func temperatureChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
+            // Legend without units — units are shown on the y-axis instead.
             ChartLegendRow(entries: [
-                (.purple, useFahrenheit ? "MyFeelsLike °F" : "MyFeelsLike °C", false),
-                (.blue,   useFahrenheit ? "Temp °F"        : "Temp °C",        false),
-                (.green,  useFahrenheit ? "Wet Bulb °F"    : "Wet Bulb °C",    false),
-                (.red,    useFahrenheit ? "Dew Pt °F"      : "Dew Pt °C",      false)
+                (.purple, "MyFeelsLike", false),
+                (.blue,   "Temp",        false),
+                (.green,  "Wet Bulb",    false),
+                (.red,    "Dew Pt",      false)
             ])
-            .padding(.leading, 8)
+            .padding(.leading, 36)
 
             Chart(series) { p in
                 LineMark(x: .value("Time", p.date),
@@ -662,6 +689,14 @@ struct TenDayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            // Unit annotation just below the topmost y-axis number.
+            .overlay(alignment: .topLeading) {
+                Text(useFahrenheit ? "°F" : "°C")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+                    .padding(.top, 14)
+            }
             .frame(height: height - 20)
         }
     }
@@ -673,7 +708,7 @@ struct TenDayView: View {
                 (.blue, "Precip %",                              true),
                 (.red,  useFahrenheit ? "Wind mph" : "Wind kph", false)
             ])
-            .padding(.leading, 8)
+            .padding(.leading, 36)
 
             Chart(series) { p in
                 AreaMark(x: .value("Time", p.date),

@@ -2,6 +2,7 @@ import SwiftUI
 import Charts
 import CoreLocation
 import Combine
+import SwiftData
 
 // MARK: - ForecastPoint
 
@@ -27,6 +28,25 @@ struct ForecastPoint: Identifiable {
     let cloudCoverLow: Double       // 0…1
     let cloudCoverMedium: Double    // 0…1
     let cloudCoverHigh: Double      // 0…1
+    let humidity: Double            // 0…1
+    let stationPressurePa: Double
+    // Personalized "feels like" — populated by FeelsLikeRegression once enough
+    // ratings exist. Nil means regression not yet active; consumers fall back
+    // to apparentTemperature.
+    var myFeelsLikeC: Double?
+    var myFeelsLikeF: Double?
+
+    var displayMyFeelsLikeC: Double { myFeelsLikeC ?? apparentTemperatureC }
+    var displayMyFeelsLikeF: Double { myFeelsLikeF ?? apparentTemperatureF }
+
+    mutating func applyPrediction(state: RegressionState?, scenario: Scenario) {
+        guard let state else {
+            myFeelsLikeC = nil; myFeelsLikeF = nil; return
+        }
+        let c = state.predict(ForecastFeatureSource(p: self, scenario: scenario))
+        myFeelsLikeC = c
+        myFeelsLikeF = TempUnit.cToF(c)
+    }
 }
 
 // MARK: - Shared components
@@ -148,13 +168,35 @@ struct ContentView: View {
     @State private var selectedPlace: Place? = nil
     @State private var nowTick: Date = .now
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
-    @State private var showPlaces = false
-    @State private var showInfo   = false
+    @State private var showPlaces   = false
+    @State private var showRate     = false
+    @State private var showSettings = false
     // Tab indices: 0 = table phantom, 1 = 24h (real), 2 = 10d (real),
     //              3 = table (real), 4 = 24h phantom  — for circular wrap.
     @State private var selectedTab = 1
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
+    @AppStorage("scenarioActivity") private var scenarioActivity: Int = 1
+    @AppStorage("scenarioDress")    private var scenarioDress:    Int = 0
+    @AppStorage("scenarioSun")      private var scenarioSun:      Int = 0
     @Environment(\.scenePhase) private var scenePhase
+
+    @Query(sort: \Rating.timestamp) private var ratings: [Rating]
+    @State private var regressionState: RegressionState? = RegressionStateStore.load()
+
+    private var scenario: Scenario {
+        Scenario(activity: scenarioActivity, dress: scenarioDress, sun: scenarioSun)
+    }
+
+    private func personalised(_ series: [ForecastPoint]) -> [ForecastPoint] {
+        guard regressionState != nil else { return series }
+        let s = regressionState
+        let sc = scenario
+        return series.map { p in
+            var copy = p
+            copy.applyPrediction(state: s, scenario: sc)
+            return copy
+        }
+    }
 
     private var displayTitle: String {
         if let name = selectedPlace?.name { return name }
@@ -202,28 +244,25 @@ struct ContentView: View {
         }
         .safeAreaInset(edge: .bottom) {
             ZStack {
-                // Places button – centred
-                Button { showPlaces = true } label: {
-                    Label("Places", systemImage: "mappin.and.ellipse")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                // Center area: Places + Rate Feels Like, side by side
+                HStack(spacing: 24) {
+                    Button { showPlaces = true } label: {
+                        Label("Places", systemImage: "mappin.and.ellipse")
+                            .padding(.vertical, 10)
+                    }
+                    Button { showRate = true } label: {
+                        Label("Rate Feels Like", systemImage: "thermometer.medium")
+                            .padding(.vertical, 10)
+                    }
+                    .disabled(weather.series24h.isEmpty)
                 }
 
                 HStack {
-                    // Unit toggle – bottom-left corner
-                    Button { useFahrenheit.toggle() } label: {
-                        Text(useFahrenheit ? "°F" : "°C")
-                            .font(.title3)
-                            .fontWeight(.medium)
-                            .padding(.horizontal)
-                            .padding(.vertical, 10)
-                    }
-
                     Spacer()
 
-                    // Info button – bottom-right corner
-                    Button { showInfo = true } label: {
-                        Image(systemName: "info.circle")
+                    // Settings cog – bottom-right corner
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape")
                             .font(.title3)
                             .padding(.horizontal)
                             .padding(.vertical, 10)
@@ -247,11 +286,17 @@ struct ContentView: View {
             }
             .presentationDetents([.large])
         }
-        .sheet(isPresented: $showInfo) {
-            NavigationStack {
-                InfoView()
+        .sheet(isPresented: $showRate) {
+            if let now = weather.series24h.first {
+                RateFeelsLikeView(
+                    snapshot: now,
+                    placeID: selectedPlace?.id,
+                    useFahrenheit: useFahrenheit
+                )
             }
-            .presentationDetents([.large])
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SettingsView() }
         }
         .onReceive(locationProvider.$currentLocation.compactMap { $0 }) { loc in
             // Only fire on a location update when there is no data yet.
@@ -274,6 +319,8 @@ struct ContentView: View {
             await loadWeather()
             places.refreshWeatherIfNeeded()
         }
+        .onChange(of: ratings.count) { _, _ in refitRegression() }
+        .onAppear { refitRegression() }
         .onReceive(progressTimer) { nowTick = $0 }
     }
 
@@ -286,6 +333,12 @@ struct ContentView: View {
             .padding(.vertical, 5)
             .background(.bar)
         Divider()
+    }
+
+    private func refitRegression() {
+        let new = FeelsLikeRegression.fit(ratings: ratings)
+        regressionState = new
+        RegressionStateStore.save(new)
     }
 
     private func loadWeather(preserveData: Bool = false) async {
@@ -304,7 +357,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             tabLabel("24 hour forecast")
             HereTodayView(
-                series: weather.isRefreshing ? [] : weather.series24h,
+                series: weather.isRefreshing ? [] : personalised(weather.series24h),
                 progress: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
@@ -318,7 +371,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             tabLabel("10 day forecast")
             TenDayView(
-                series: weather.isRefreshing ? [] : weather.series10d,
+                series: weather.isRefreshing ? [] : personalised(weather.series10d),
                 progress: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
@@ -334,7 +387,8 @@ struct ContentView: View {
             ForecastTableView(
                 weatherService: weather,
                 nowTick: nowTick,
-                onRefresh: { await loadWeather(preserveData: true) }
+                onRefresh: { await loadWeather(preserveData: true) },
+                personalise: { self.personalised($0) }
             )
         }
     }
@@ -378,6 +432,7 @@ struct HereTodayView: View {
                         .frame(minHeight: h)
                 } else {
                     VStack(spacing: 8) {
+                        ScenarioStrip()
                         temperatureChart(height: h * 0.55)
                         precipWindChart(height: h * 0.36)
                         if let attribution {
@@ -396,9 +451,10 @@ struct HereTodayView: View {
     private func temperatureChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue,  useFahrenheit ? "Temp °F"     : "Temp °C",     false),
-                (.green, useFahrenheit ? "Wet Bulb °F" : "Wet Bulb °C", false),
-                (.red,   useFahrenheit ? "Dew Pt °F"   : "Dew Pt °C",   false)
+                (.purple, useFahrenheit ? "MyFeelsLike °F" : "MyFeelsLike °C", false),
+                (.blue,   useFahrenheit ? "Temp °F"        : "Temp °C",        false),
+                (.green,  useFahrenheit ? "Wet Bulb °F"    : "Wet Bulb °C",    false),
+                (.red,    useFahrenheit ? "Dew Pt °F"      : "Dew Pt °C",      false)
             ])
             .padding(.leading, 8)
 
@@ -407,14 +463,22 @@ struct HereTodayView: View {
                          y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
                          series: .value("S", "A"))
                     .foregroundStyle(.blue).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
                 LineMark(x: .value("Time", p.date),
                          y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
                          series: .value("S", "B"))
                     .foregroundStyle(.green).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
                 LineMark(x: .value("Time", p.date),
                          y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
                          series: .value("S", "C"))
                     .foregroundStyle(.red).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                LineMark(x: .value("Time", p.date),
+                         y: .value("MyFeelsLike", useFahrenheit ? p.displayMyFeelsLikeF : p.displayMyFeelsLikeC),
+                         series: .value("S", "D"))
+                    .foregroundStyle(.purple).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 4.0))
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))
@@ -532,6 +596,7 @@ struct TenDayView: View {
                         .frame(minHeight: h)
                 } else {
                     VStack(spacing: 8) {
+                        ScenarioStrip()
                         temperatureChart(height: h * 0.55)
                         precipWindChart(height: h * 0.36)
                         if let attribution {
@@ -550,9 +615,10 @@ struct TenDayView: View {
     private func temperatureChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue,  useFahrenheit ? "Temp °F"     : "Temp °C",     false),
-                (.green, useFahrenheit ? "Wet Bulb °F" : "Wet Bulb °C", false),
-                (.red,   useFahrenheit ? "Dew Pt °F"   : "Dew Pt °C",   false)
+                (.purple, useFahrenheit ? "MyFeelsLike °F" : "MyFeelsLike °C", false),
+                (.blue,   useFahrenheit ? "Temp °F"        : "Temp °C",        false),
+                (.green,  useFahrenheit ? "Wet Bulb °F"    : "Wet Bulb °C",    false),
+                (.red,    useFahrenheit ? "Dew Pt °F"      : "Dew Pt °C",      false)
             ])
             .padding(.leading, 8)
 
@@ -561,14 +627,22 @@ struct TenDayView: View {
                          y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
                          series: .value("S", "A"))
                     .foregroundStyle(.blue).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
                 LineMark(x: .value("Time", p.date),
                          y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
                          series: .value("S", "B"))
                     .foregroundStyle(.green).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
                 LineMark(x: .value("Time", p.date),
                          y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
                          series: .value("S", "C"))
                     .foregroundStyle(.red).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                LineMark(x: .value("Time", p.date),
+                         y: .value("MyFeelsLike", useFahrenheit ? p.displayMyFeelsLikeF : p.displayMyFeelsLikeC),
+                         series: .value("S", "D"))
+                    .foregroundStyle(.purple).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 4.0))
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))

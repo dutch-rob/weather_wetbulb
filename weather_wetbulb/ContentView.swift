@@ -7,7 +7,14 @@ import SwiftData
 // MARK: - ForecastPoint
 
 struct ForecastPoint: Identifiable {
-    let id = UUID()
+    /// Where this point sits relative to "now":
+    ///   .historic — observed/analysed past hour (full field set)
+    ///   .current  — Apple's nowcast; lacks precip & cloud-by-altitude
+    ///   .forecast — future hourly forecast (full field set)
+    enum Kind { case historic, current, forecast }
+
+    var id = UUID()
+    var kind: Kind = .forecast
     let date: Date
     let symbolName: String
     let isDaylight: Bool
@@ -24,35 +31,33 @@ struct ForecastPoint: Identifiable {
     let precipitationMM: Double
     let windSpeedMPH: Double
     let windSpeedKPH: Double
+    let windGustMPH: Double
+    let windGustKPH: Double
     let cloudCover: Double          // 0…1
     let cloudCoverLow: Double       // 0…1
     let cloudCoverMedium: Double    // 0…1
     let cloudCoverHigh: Double      // 0…1
     let humidity: Double            // 0…1
     let stationPressurePa: Double
-    // Personalized "feels like" — populated by FeelsLikeRegression once enough
-    // ratings exist. Nil means regression not yet active; consumers fall back
-    // to apparentTemperature.
-    var myFeelsLikeC: Double?
-    var myFeelsLikeF: Double?
-
-    var displayMyFeelsLikeC: Double { myFeelsLikeC ?? apparentTemperatureC }
-    var displayMyFeelsLikeF: Double { myFeelsLikeF ?? apparentTemperatureF }
+    /// Personalised "feels like" score (0…1000) — populated by the regression
+    /// once enough user ratings exist. Nil = no model yet.
+    var myFeelsLikeScore: Double?
+    /// Visual opacity of the personalised colour at this point:
+    ///   1.0 = forecast firmly within training distribution
+    ///   0.0 = extrapolation (don't trust the model here)
+    /// Used by the chart background and the table cell to fade the colour
+    /// where the model becomes unreliable.
+    var myFeelsLikeOpacity: Double = 0.0
 
     mutating func applyPrediction(state: RegressionState?, scenario: Scenario) {
         guard let state else {
-            myFeelsLikeC = nil; myFeelsLikeF = nil; return
+            myFeelsLikeScore = nil
+            myFeelsLikeOpacity = 0
+            return
         }
-        // Leverage-weighted blend between model and apparent temperature.
-        // For in-range forecasts this is just the model; far-out-of-range
-        // forecasts smoothly fall back to apparent so we never display a
-        // wildly extrapolated personalised number.
-        let (c, _) = state.blendedPredictionC(
-            ForecastFeatureSource(p: self, scenario: scenario),
-            apparentC: apparentTemperatureC
-        )
-        myFeelsLikeC = c
-        myFeelsLikeF = TempUnit.cToF(c)
+        let src = ForecastFeatureSource(p: self, scenario: scenario)
+        myFeelsLikeScore   = state.predict(src)
+        myFeelsLikeOpacity = state.predictionOpacity(src)
     }
 }
 
@@ -189,6 +194,12 @@ struct ContentView: View {
 
     @Query(sort: \Rating.timestamp) private var ratings: [Rating]
     @State private var regressionState: RegressionState? = RegressionStateStore.load()
+    @Environment(\.modelContext) private var modelContext
+    /// One-shot wipe flag: when transitioning to the 0–1000 colour-score
+    /// system, all previously-collected ratings (and the stored regression
+    /// state, which was trained against feelsLikeC) are discarded so the
+    /// fresh score-based model can be built from new data.
+    @AppStorage("didWipeForScoreV1") private var didWipeForScoreV1: Bool = false
 
     private var scenario: Scenario {
         Scenario(activity: scenarioActivity, dress: scenarioDress, sun: scenarioSun)
@@ -334,7 +345,16 @@ struct ContentView: View {
             places.refreshWeatherIfNeeded()
         }
         .onChange(of: ratings.count) { _, _ in refitRegression() }
-        .onAppear { refitRegression() }
+        .onAppear {
+            if !didWipeForScoreV1 {
+                for r in ratings { modelContext.delete(r) }
+                try? modelContext.save()
+                RegressionStateStore.save(nil)
+                regressionState = nil
+                didWipeForScoreV1 = true
+            }
+            refitRegression()
+        }
         .onReceive(progressTimer) { nowTick = $0 }
     }
 
@@ -495,11 +515,29 @@ struct HereTodayView: View {
                          series: .value("S", "C"))
                     .foregroundStyle(.red).interpolationMethod(.linear)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
+                // Official apparent temperature from WeatherKit — always drawn,
+                // solid, same thickness as the other lines. The personalised
+                // model is shown as a chart background colour instead of a line.
                 LineMark(x: .value("Time", p.date),
-                         y: .value("MyFeelsLike", useFahrenheit ? p.displayMyFeelsLikeF : p.displayMyFeelsLikeC),
+                         y: .value("Apparent",
+                                   useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
                          series: .value("S", "D"))
                     .foregroundStyle(.purple).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 4.0))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+            }
+            .chartBackground { proxy in
+                let stops = myFeelsLikeBackgroundStops(series)
+                if !stops.isEmpty {
+                    GeometryReader { geo in
+                        let frame = geo[proxy.plotAreaFrame]
+                        LinearGradient(
+                            gradient: Gradient(stops: stops),
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                    }
+                }
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))
@@ -536,8 +574,9 @@ struct HereTodayView: View {
     private func precipWindChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue, "Precip %",                               true),
-                (.red,  useFahrenheit ? "Wind mph" : "Wind kph",  false)
+                (.blue,             "Precip %",                                true),
+                (.red,              useFahrenheit ? "Wind mph" : "Wind kph",   false),
+                (.red.opacity(0.5), useFahrenheit ? "Gust mph" : "Gust kph",   false)
             ])
             .padding(.leading, 36)
 
@@ -546,7 +585,14 @@ struct HereTodayView: View {
                          y: .value("Precip %", p.precipProbability * 100))
                     .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH))
+                         y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
+                         series: .value("S", "G"))
+                    .foregroundStyle(.red.opacity(0.45)).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                    .symbol(Circle()).symbolSize(0)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
+                         series: .value("S", "W"))
                     .foregroundStyle(.red).interpolationMethod(.linear)
                     .symbol(Circle()).symbolSize(0)
             }
@@ -673,10 +719,25 @@ struct TenDayView: View {
                     .foregroundStyle(.red).interpolationMethod(.linear)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
                 LineMark(x: .value("Time", p.date),
-                         y: .value("MyFeelsLike", useFahrenheit ? p.displayMyFeelsLikeF : p.displayMyFeelsLikeC),
+                         y: .value("Apparent",
+                                   useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
                          series: .value("S", "D"))
                     .foregroundStyle(.purple).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 4.0))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+            }
+            .chartBackground { proxy in
+                let stops = myFeelsLikeBackgroundStops(series)
+                if !stops.isEmpty {
+                    GeometryReader { geo in
+                        let frame = geo[proxy.plotAreaFrame]
+                        LinearGradient(
+                            gradient: Gradient(stops: stops),
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                    }
+                }
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))
@@ -712,8 +773,9 @@ struct TenDayView: View {
     private func precipWindChart(height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: [
-                (.blue, "Precip %",                              true),
-                (.red,  useFahrenheit ? "Wind mph" : "Wind kph", false)
+                (.blue,             "Precip %",                                true),
+                (.red,              useFahrenheit ? "Wind mph" : "Wind kph",   false),
+                (.red.opacity(0.5), useFahrenheit ? "Gust mph" : "Gust kph",   false)
             ])
             .padding(.leading, 36)
 
@@ -722,7 +784,14 @@ struct TenDayView: View {
                          y: .value("Precip %", p.precipProbability * 100))
                     .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
                 LineMark(x: .value("Time", p.date),
-                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH))
+                         y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
+                         series: .value("S", "G"))
+                    .foregroundStyle(.red.opacity(0.45)).interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                    .symbol(Circle()).symbolSize(0)
+                LineMark(x: .value("Time", p.date),
+                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
+                         series: .value("S", "W"))
                     .foregroundStyle(.red).interpolationMethod(.linear)
                     .symbol(Circle()).symbolSize(0)
             }
@@ -748,6 +817,108 @@ struct TenDayView: View {
         }
     }
 }
+
+// MARK: - Personalised colour background for the temperature chart
+
+/// Maximum alpha applied to the model-prediction background in temperature
+/// charts. Keeps the chart's foreground lines readable.
+private let chartBackgroundMaxAlpha: Double = 0.55
+
+/// Build the horizontal gradient stops representing the model's predicted
+/// score at each forecast hour. Stops are placed at fractional positions
+/// along the x-axis (one stop per hour); each stop's alpha is the model's
+/// own opacity (= leverage fade) capped by chartBackgroundMaxAlpha.
+///
+/// Returns an empty array when no point has a score (no model fitted).
+private func myFeelsLikeBackgroundStops(_ series: [ForecastPoint]) -> [Gradient.Stop] {
+    guard series.count > 1 else { return [] }
+    guard series.contains(where: { $0.myFeelsLikeScore != nil }) else { return [] }
+    let last = series.count - 1
+    return series.enumerated().compactMap { (i, p) -> Gradient.Stop? in
+        guard let score = p.myFeelsLikeScore else { return nil }
+        let alpha = max(0, min(1, p.myFeelsLikeOpacity)) * chartBackgroundMaxAlpha
+        let color = ColorScale.color(forScore: score).opacity(alpha)
+        return Gradient.Stop(color: color, location: CGFloat(i) / CGFloat(last))
+    }
+}
+
+// MARK: - Solid-run tagging for the MyFeelsLike chart line (legacy, unused)
+
+#if false
+private struct TaggedPoint: Identifiable {
+    var id: UUID { base.id }
+    let base: ForecastPoint
+    let solidRunID: Int?
+}
+
+/// Assigns each contiguous run of w==0 points a unique integer run ID.
+private func tagSolidRuns(_ pts: [ForecastPoint]) -> [TaggedPoint] {
+    var out: [TaggedPoint] = []
+    var runID = 0
+    var prevWasBlended = true
+    for p in pts {
+        if p.myFeelsLikeApparentWeight == 0 {
+            if prevWasBlended { runID += 1 }   // new run starts
+            out.append(TaggedPoint(base: p, solidRunID: runID))
+            prevWasBlended = false
+        } else {
+            out.append(TaggedPoint(base: p, solidRunID: nil))
+            prevWasBlended = true
+        }
+    }
+    return out
+}
+#endif
+
+// MARK: - Indoor (evaporative cooler) controls — currently disabled
+
+#if false
+struct IndoorControlsView: View {
+    @Binding var insulation: Double
+    @AppStorage("fanEnabled") private var fanEnabled: Bool = false
+    @AppStorage("fanWindKPH") private var fanWindKPH: Double = 10
+    @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("House insulation").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(Int(insulation.rounded()))%")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $insulation, in: 0...100, step: 1)
+                Text("0 = indoor ≈ outdoor air   ·   100 = cools to wet-bulb")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Toggle(isOn: $fanEnabled) {
+                Text("Fan").font(.subheadline.weight(.semibold))
+            }
+
+            if fanEnabled {
+                let unit  = useFahrenheit ? "mph" : "kph"
+                let shown = useFahrenheit ? fanWindKPH / 1.609344 : fanWindKPH
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("Fan air speed").font(.caption)
+                        Spacer()
+                        Text(String(format: "%.0f %@", shown, unit))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $fanWindKPH, in: 0...40, step: 1)
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+    }
+}
+#endif
 
 // MARK: - View extension
 

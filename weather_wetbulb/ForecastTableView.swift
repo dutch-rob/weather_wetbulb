@@ -63,7 +63,7 @@ struct ForecastTableView: View {
     private let wTemp:   CGFloat = 95
     private let wWet:    CGFloat = 62
     private let wDew:    CGFloat = 55
-    private let wWind:   CGFloat = 52
+    private let wWind:   CGFloat = 78
     private let wPrecip: CGFloat = 82
     private let wCloud:  CGFloat = 110
 
@@ -135,9 +135,8 @@ struct ForecastTableView: View {
 
     private var columnHeaderRow: some View {
         HStack(spacing: 0) {
-            // Force the line break after "MyFeels".
-            headerCell("MyFeels\nLike " + (useFahrenheit ? "°F" : "°C"),
-                       width: wMyFL, align: .trailing)
+            // MyFeels score column — unitless 0…1000 scale, no °F/°C suffix.
+            headerCell("MyFeels\nLike", width: wMyFL, align: .center)
                 .padding(.trailing, myFLTrailingGap)
             headerCell("Time",                                              width: wTime,  align: .leading)
             headerCell("",                                                  width: wSym,   align: .center)
@@ -145,7 +144,7 @@ struct ForecastTableView: View {
             headerCell("Temp /\nfeels " + (useFahrenheit ? "°F" : "°C"),    width: wTemp,  align: .trailing)
             headerCell("Wet\nbulb " + (useFahrenheit ? "°F" : "°C"),        width: wWet,   align: .trailing)
             headerCell("Dew\npt " + (useFahrenheit ? "°F" : "°C"),          width: wDew,   align: .trailing)
-            headerCell("Wind\n" + (useFahrenheit ? "mph" : "kph"),          width: wWind,  align: .trailing)
+            headerCell("Wind (gust)\n" + (useFahrenheit ? "mph" : "kph"),   width: wWind,  align: .trailing)
             headerCell("Precip\n(%)",                                       width: wPrecip, align: .trailing)
             headerCell("Cloud\n(%)",                                        width: wCloud,  align: .trailing)
         }
@@ -191,7 +190,7 @@ struct ForecastTableView: View {
             cell(fmtTemp(p),                                             width: wTemp,  align: .trailing, color: Self.cTemp)
             cell(fmt1(useFahrenheit ? p.wetBulbF    : p.wetBulbC),       width: wWet,   align: .trailing, color: Self.cWet)
             cell(fmt1(useFahrenheit ? p.dewPointF   : p.dewPointC),      width: wDew,   align: .trailing, color: Self.cDew)
-            cell(fmt1(useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),  width: wWind,  align: .trailing, color: Self.cWind)
+            cell(fmtWind(p),                                             width: wWind,  align: .trailing, color: Self.cWind)
             cell(fmtPrecip(p),  width: wPrecip, align: .trailing, color: Self.cPrecip)
             cell(fmtCloud(p),   width: wCloud,  align: .trailing)
         }
@@ -200,17 +199,26 @@ struct ForecastTableView: View {
         .padding(.horizontal, 8)
     }
 
-    // MyFeelsLike cell — purple, bold; dimmed (italic) when the regression
-    // model isn't active yet and we're showing apparent temp as a placeholder.
+    // MyFeels score cell — coloured background, 3-digit number with text colour
+    // chosen for contrast. Empty dash when no model has been fitted yet.
     @ViewBuilder
     private func myFeelsLikeCell(_ p: ForecastPoint) -> some View {
-        let value = useFahrenheit ? p.displayMyFeelsLikeF : p.displayMyFeelsLikeC
-        let isPlaceholder = (useFahrenheit ? p.myFeelsLikeF : p.myFeelsLikeC) == nil
-        Text(fmt1(value))
-            .font(.caption.weight(.semibold))
-            .italic(isPlaceholder)
-            .foregroundStyle(Self.cMyFL.opacity(isPlaceholder ? 0.55 : 1.0))
-            .frame(width: wMyFL, alignment: .trailing)
+        if let score = p.myFeelsLikeScore {
+            let clamped = max(ColorScale.minScore, min(ColorScale.maxScore, score))
+            Text(String(format: "%.0f", clamped))
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(ColorScale.contrastingText(forScore: clamped))
+                .frame(width: wMyFL, alignment: .center)
+                .padding(.vertical, 2)
+                .background(ColorScale.color(forScore: clamped))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+        } else {
+            Text("—")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: wMyFL, alignment: .center)
+        }
     }
 
     // MARK: Formatting helpers
@@ -222,6 +230,12 @@ struct ForecastTableView: View {
         useFahrenheit
             ? String(format: "%.1f (%.1f)", p.temperatureF, p.apparentTemperatureF)
             : String(format: "%.1f (%.1f)", p.temperatureC, p.apparentTemperatureC)
+    }
+
+    private func fmtWind(_ p: ForecastPoint) -> String {
+        let s = useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH
+        let g = useFahrenheit ? p.windGustMPH  : p.windGustKPH
+        return String(format: "%.0f (%.0f)", s, g)
     }
 
     private func fmtPrecip(_ p: ForecastPoint) -> String {

@@ -79,6 +79,39 @@ enum ColorScale {
         ui.getRed(&r, green: &g, blue: &b, alpha: &a)
         return (Double(r), Double(g), Double(b))
     }
+
+    // MARK: - Score-based scale (0…1000)
+    //
+    // The app now expresses "feels like" as a pure color on a 0…1000 scale —
+    // no temperature units exposed to the user. Anchor colors from the
+    // temperature scale are reused, but distributed evenly across [0, 1000].
+
+    static let minScore: Double = 0
+    static let maxScore: Double = 1000
+
+    /// Color at an arbitrary score (clamped to [0, 1000]).
+    static func color(forScore score: Double) -> Color {
+        let n = anchors.count
+        let s = max(minScore, min(maxScore, score))
+        let pos = (s / maxScore) * Double(n - 1)
+        let lo  = Int(floor(pos))
+        let hi  = min(n - 1, lo + 1)
+        let frac = pos - Double(lo)
+        let (r1, g1, b1) = rgb(anchors[lo].color)
+        let (r2, g2, b2) = rgb(anchors[hi].color)
+        return Color(
+            red:   r1 + (r2 - r1) * frac,
+            green: g1 + (g2 - g1) * frac,
+            blue:  b1 + (b2 - b1) * frac
+        )
+    }
+
+    /// Black or white, whichever contrasts better with `color(forScore:)`.
+    static func contrastingText(forScore score: Double) -> Color {
+        let (r, g, b) = rgb(color(forScore: score))
+        let luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        return luminance > 0.55 ? .black : .white
+    }
 }
 
 // Convenience temperature conversions.

@@ -13,22 +13,36 @@ struct Place: Identifiable, Equatable, Codable {
     var longitude: Double
     var altitude: Double   // metres above sea level; 0 when unknown
 
-    init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double, altitude: Double = 0) {
+    /// When true, this place models the indoor climate of an evaporative
+    /// cooler running on the outdoor weather at this location.
+    var isIndoor: Bool
+    /// House insulation quality, 0…100. Only meaningful when isIndoor.
+    /// 0 = no insulation (indoor temp = outdoor dry bulb),
+    /// 100 = perfect (indoor temp reaches outdoor wet bulb).
+    var insulation: Double
+
+    init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double,
+         altitude: Double = 0, isIndoor: Bool = false, insulation: Double = 50) {
         self.id = id
         self.name = name
         self.latitude = latitude
         self.longitude = longitude
         self.altitude = altitude
+        self.isIndoor = isIndoor
+        self.insulation = insulation
     }
 
-    // Backward-compatible decode: altitude was added later; treat missing key as 0.
+    // Backward-compatible decode: altitude, isIndoor and insulation were added
+    // later; treat missing keys as defaults.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id        = try c.decode(UUID.self,   forKey: .id)
-        name      = try c.decode(String.self, forKey: .name)
-        latitude  = try c.decode(Double.self, forKey: .latitude)
-        longitude = try c.decode(Double.self, forKey: .longitude)
-        altitude  = try c.decodeIfPresent(Double.self, forKey: .altitude) ?? 0
+        id         = try c.decode(UUID.self,   forKey: .id)
+        name       = try c.decode(String.self, forKey: .name)
+        latitude   = try c.decode(Double.self, forKey: .latitude)
+        longitude  = try c.decode(Double.self, forKey: .longitude)
+        altitude   = try c.decodeIfPresent(Double.self, forKey: .altitude) ?? 0
+        isIndoor   = try c.decodeIfPresent(Bool.self,   forKey: .isIndoor) ?? false
+        insulation = try c.decodeIfPresent(Double.self, forKey: .insulation) ?? 50
     }
 
     var coordinate: CLLocationCoordinate2D {
@@ -157,8 +171,13 @@ final class PlacesViewModel: ObservableObject {
         }
     }
 
-    func addPlace(name: String, coordinate: CLLocationCoordinate2D) {
-        places.append(Place(name: name, latitude: coordinate.latitude, longitude: coordinate.longitude))
+    func addPlace(name: String, coordinate: CLLocationCoordinate2D,
+                  isIndoor: Bool = false, insulation: Double = 50) {
+        places.append(Place(name: name,
+                            latitude: coordinate.latitude,
+                            longitude: coordinate.longitude,
+                            isIndoor: isIndoor,
+                            insulation: insulation))
         save()
     }
 
@@ -179,11 +198,22 @@ final class PlacesViewModel: ObservableObject {
         save()
     }
 
-    func update(_ place: Place, name: String, coordinate: CLLocationCoordinate2D) {
+    func update(_ place: Place, name: String, coordinate: CLLocationCoordinate2D,
+                isIndoor: Bool = false, insulation: Double = 50) {
         guard let idx = places.firstIndex(where: { $0.id == place.id }) else { return }
-        places[idx].name      = name
-        places[idx].latitude  = coordinate.latitude
-        places[idx].longitude = coordinate.longitude
+        places[idx].name       = name
+        places[idx].latitude   = coordinate.latitude
+        places[idx].longitude  = coordinate.longitude
+        places[idx].isIndoor   = isIndoor
+        places[idx].insulation = insulation
+        save()
+    }
+
+    /// Update only the insulation of an indoor place (used by the in-house
+    /// view's slider, which edits the place live).
+    func updateInsulation(_ place: Place, insulation: Double) {
+        guard let idx = places.firstIndex(where: { $0.id == place.id }) else { return }
+        places[idx].insulation = insulation
         save()
     }
 

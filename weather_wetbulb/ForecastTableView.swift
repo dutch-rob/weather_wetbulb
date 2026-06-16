@@ -32,12 +32,20 @@ struct ForecastTableView: View {
         let points: [ForecastPoint]
     }
 
+    /// Historic (past 24 h) → "now" → forecast, all personalised, in time order.
+    private var allRows: [ForecastPoint] {
+        var pts = personalise(weatherService.historic24h)
+        if let c = weatherService.current { pts += personalise([c]) }
+        pts += personalise(weatherService.series10d)
+        return pts
+    }
+
     private var daySections: [DaySection] {
         var sections: [DaySection] = []
         var currentKey  = ""
         var currentPts: [ForecastPoint] = []
 
-        for pt in personalise(weatherService.series10d) {
+        for pt in allRows {
             let key = Self.dayHeaderFormatter.string(from: pt.date)
             if key != currentKey {
                 if !currentPts.isEmpty {
@@ -53,6 +61,14 @@ struct ForecastTableView: View {
             sections.append(DaySection(id: currentKey, title: currentKey, points: currentPts))
         }
         return sections
+    }
+
+    /// Scroll so the "now" row sits at the top (history above, forecast below).
+    private func scrollToNow(_ proxy: ScrollViewProxy) {
+        guard let id = weatherService.current?.id else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo(id, anchor: .top)
+        }
     }
 
     // Column widths (tweaked for narrower cloud column + extra space after MyFeel)
@@ -98,35 +114,47 @@ struct ForecastTableView: View {
                 // Scenario adjusters (only those that are actually in the model)
                 ScenarioStrip(activeFeatures: activeFeatures)
 
-                ScrollView([.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                        ForEach(daySections) { section in
-                            Section {
-                                ForEach(section.points) { point in
-                                    dataRow(point)
-                                        .background(rowBackground(point))
-                                }
-                            } header: {
-                                VStack(spacing: 0) {
-                                    Text(section.title)
-                                        .font(.subheadline).fontWeight(.semibold)
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 4)
-                                        .frame(minWidth: totalWidth, alignment: .center)
-                                        .background(.bar)
-                                    columnHeaderRow
+                ScrollViewReader { proxy in
+                    ScrollView([.vertical, .horizontal]) {
+                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                            if weatherService.historicUnavailable {
+                                Text("Past 24 h not available for this location.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 6)
+                            }
+                            ForEach(daySections) { section in
+                                Section {
+                                    ForEach(section.points) { point in
+                                        dataRow(point)
+                                            .background(rowBackground(point))
+                                    }
+                                } header: {
+                                    VStack(spacing: 0) {
+                                        Text(section.title)
+                                            .font(.subheadline).fontWeight(.semibold)
+                                            .padding(.horizontal)
+                                            .padding(.vertical, 4)
+                                            .frame(minWidth: totalWidth, alignment: .center)
+                                            .background(.bar)
+                                        columnHeaderRow
+                                    }
                                 }
                             }
-                        }
 
-                        if let attr = weatherService.attribution {
-                            WeatherAttributionLink(info: attr)
-                                .padding()
+                            if let attr = weatherService.attribution {
+                                WeatherAttributionLink(info: attr)
+                                    .padding()
+                            }
                         }
+                        .frame(minWidth: totalWidth)
                     }
-                    .frame(minWidth: totalWidth)
+                    .refreshable { await onRefresh?() }
+                    // Open centred on "now"; re-anchor when a fresh load arrives.
+                    .onAppear { scrollToNow(proxy) }
+                    .onChange(of: weatherService.current?.id) { _, _ in scrollToNow(proxy) }
                 }
-                .refreshable { await onRefresh?() }
             }
         }
     }
@@ -179,7 +207,9 @@ struct ForecastTableView: View {
             myFeelsLikeCell(p)
                 .padding(.trailing, myFLTrailingGap)
 
-            cell(Self.timeFormatter.string(from: p.date), width: wTime, align: .leading)
+            cell(p.kind == .current ? "now" : Self.timeFormatter.string(from: p.date),
+                 width: wTime, align: .leading,
+                 color: p.kind == .current ? Self.cMyFL : nil)
 
             // Weather condition icon
             Image(systemName: p.symbolName)
@@ -191,7 +221,8 @@ struct ForecastTableView: View {
             cell(fmt1(useFahrenheit ? p.wetBulbF    : p.wetBulbC),       width: wWet,   align: .trailing, color: Self.cWet)
             cell(fmt1(useFahrenheit ? p.dewPointF   : p.dewPointC),      width: wDew,   align: .trailing, color: Self.cDew)
             cell(fmtWind(p),                                             width: wWind,  align: .trailing, color: Self.cWind)
-            cell(fmtPrecip(p),  width: wPrecip, align: .trailing, color: Self.cPrecip)
+            // CurrentWeather has no precipitation or cloud-by-altitude breakdown.
+            cell(p.kind == .current ? "" : fmtPrecip(p), width: wPrecip, align: .trailing, color: Self.cPrecip)
             cell(fmtCloud(p),   width: wCloud,  align: .trailing)
         }
         .font(.caption)
@@ -243,11 +274,15 @@ struct ForecastTableView: View {
     }
 
     private func fmtCloud(_ p: ForecastPoint) -> String {
-        String(format: "%.0f (l:%.0f m:%.0f h:%.0f)",
-               p.cloudCover * 100,
-               p.cloudCoverLow * 100,
-               p.cloudCoverMedium * 100,
-               p.cloudCoverHigh * 100)
+        // "now" has total cloud only — no by-altitude breakdown.
+        if p.kind == .current {
+            return String(format: "%.0f", p.cloudCover * 100)
+        }
+        return String(format: "%.0f (l:%.0f m:%.0f h:%.0f)",
+                      p.cloudCover * 100,
+                      p.cloudCoverLow * 100,
+                      p.cloudCoverMedium * 100,
+                      p.cloudCoverHigh * 100)
     }
 
     // MARK: Layout helpers
@@ -265,11 +300,10 @@ struct ForecastTableView: View {
             .lineLimit(1)
     }
 
-    // Subtle alternating row tint (uses the current hour's row for extra emphasis)
+    // Subtle alternating row tint; the "now" row gets extra emphasis.
     private func rowBackground(_ p: ForecastPoint) -> Color {
-        let isNearNow = abs(p.date.timeIntervalSinceNow) < 1800
-        if isNearNow { return Color.accentColor.opacity(0.08) }
-        let idx = weatherService.series10d.firstIndex(where: { $0.id == p.id }) ?? 0
+        if p.kind == .current { return Color.accentColor.opacity(0.12) }
+        let idx = allRows.firstIndex(where: { $0.id == p.id }) ?? 0
         return idx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.03)
     }
 }

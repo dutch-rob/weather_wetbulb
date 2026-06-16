@@ -254,6 +254,9 @@ final class WeatherService: ObservableObject {
             placeDescription = ""
             series24h        = []
             series10d        = []
+            historic24h      = []
+            current          = nil
+            historicUnavailable = false
         }
         finish(.location)
         start(.weather)
@@ -270,8 +273,30 @@ final class WeatherService: ObservableObject {
                                    end: now.addingTimeInterval(24 * 3600), location: location)
             series10d = mapPoints(from: hours, start: now,
                                    end: now.addingTimeInterval(240 * 3600), location: location)
+            // "now" point from Apple's current-conditions nowcast.
+            current = mapCurrent(weather.currentWeather, location: location)
             isRefreshing  = false          // new data is in; hide spinner
             lastFetchedAt = Date()
+
+            // Observed past ~24 h — a separate query that must not break the
+            // forecast if it fails. Empty result → note shown in the table only.
+            let histStart = now.addingTimeInterval(-24 * 3600)
+            let histWeather = try? await withTimeout(10) {
+                try await sharedWeatherService.weather(
+                    for: location,
+                    including: .hourly(startDate: histStart, endDate: now))
+            }
+            guard loadGeneration == gen else { return }
+            if let histWeather {
+                let pts = mapPoints(from: histWeather.forecast,
+                                    start: histStart, end: now,
+                                    location: location, kind: .historic)
+                historic24h = pts
+                historicUnavailable = pts.isEmpty
+            } else {
+                historic24h = []
+                historicUnavailable = true
+            }
 
             guard loadGeneration == gen else { return }
             start(.geocode)

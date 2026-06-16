@@ -223,6 +223,11 @@ struct ContentView: View {
         }
     }
 
+    private func personalised(_ point: ForecastPoint?) -> ForecastPoint? {
+        guard let point else { return nil }
+        return personalised([point]).first
+    }
+
     private var displayTitle: String {
         if let name = selectedPlace?.name { return name }
         return weather.placeDescription.isEmpty ? "Loading…" : weather.placeDescription
@@ -392,6 +397,7 @@ struct ContentView: View {
             tabLabel("24 hour forecast")
             HereTodayView(
                 series: weather.isRefreshing ? [] : personalised(weather.series24h),
+                current: weather.isRefreshing ? nil : personalised(weather.current),
                 progress: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
@@ -407,6 +413,8 @@ struct ContentView: View {
             tabLabel("10 day forecast")
             TenDayView(
                 series: weather.isRefreshing ? [] : personalised(weather.series10d),
+                historic: weather.isRefreshing ? [] : personalised(weather.historic24h),
+                current: weather.isRefreshing ? nil : personalised(weather.current),
                 progress: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
@@ -435,6 +443,9 @@ struct ContentView: View {
 
 struct HereTodayView: View {
     var series: [ForecastPoint]
+    /// Apple's current-conditions nowcast, drawn as prominent "now" dots in a
+    /// small gap to the left of the forecast curves.
+    var current: ForecastPoint? = nil
     var progress: LoadProgress = LoadProgress()
     var nowTick: Date = .now
     var errorMessage: String? = nil
@@ -446,9 +457,19 @@ struct HereTodayView: View {
 
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
+    /// Domain begins ~1 h before "now" so the forecast curves sit slightly to
+    /// the right, leaving a gap on the left for the prominent current dots.
     private var dateDomain: ClosedRange<Date>? {
-        guard let first = series.first?.date, let last = series.last?.date else { return nil }
-        return first...last
+        guard let last = series.last?.date else { return nil }
+        let lo: Date
+        if let c = current?.date {
+            lo = c.addingTimeInterval(-3600)
+        } else if let first = series.first?.date {
+            lo = first
+        } else {
+            return nil
+        }
+        return lo...last
     }
 
     private static let hourFormatter: DateFormatter = {
@@ -499,31 +520,49 @@ struct HereTodayView: View {
             ])
             .padding(.leading, 36)   // start near the y-axis line, not the y-axis labels
 
-            Chart(series) { p in
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
-                         series: .value("S", "A"))
-                    .foregroundStyle(.blue).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
-                         series: .value("S", "B"))
-                    .foregroundStyle(.green).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
-                         series: .value("S", "C"))
-                    .foregroundStyle(.red).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                // Official apparent temperature from WeatherKit — always drawn,
-                // solid, same thickness as the other lines. The personalised
-                // model is shown as a chart background colour instead of a line.
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Apparent",
-                                   useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
-                         series: .value("S", "D"))
-                    .foregroundStyle(.purple).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+            Chart {
+                ForEach(series) { p in
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
+                             series: .value("S", "A"))
+                        .foregroundStyle(.blue).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
+                             series: .value("S", "B"))
+                        .foregroundStyle(.green).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
+                             series: .value("S", "C"))
+                        .foregroundStyle(.red).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    // Official apparent temperature from WeatherKit — always drawn,
+                    // solid, same thickness as the other lines. The personalised
+                    // model is shown as a chart background colour instead of a line.
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Apparent",
+                                       useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
+                             series: .value("S", "D"))
+                        .foregroundStyle(.purple).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
+                // Prominent "now" dots in the gap left of the forecast curves.
+                if let c = current {
+                    PointMark(x: .value("Time", c.date),
+                              y: .value("Temp", useFahrenheit ? c.temperatureF : c.temperatureC))
+                        .foregroundStyle(.blue).symbolSize(110)
+                    PointMark(x: .value("Time", c.date),
+                              y: .value("Wet Bulb", useFahrenheit ? c.wetBulbF : c.wetBulbC))
+                        .foregroundStyle(.green).symbolSize(110)
+                    PointMark(x: .value("Time", c.date),
+                              y: .value("Dew Point", useFahrenheit ? c.dewPointF : c.dewPointC))
+                        .foregroundStyle(.red).symbolSize(110)
+                    PointMark(x: .value("Time", c.date),
+                              y: .value("Apparent",
+                                        useFahrenheit ? c.apparentTemperatureF : c.apparentTemperatureC))
+                        .foregroundStyle(.purple).symbolSize(110)
+                }
             }
             .chartBackground { proxy in
                 let stops = myFeelsLikeBackgroundStops(series)
@@ -580,21 +619,32 @@ struct HereTodayView: View {
             ])
             .padding(.leading, 36)
 
-            Chart(series) { p in
-                AreaMark(x: .value("Time", p.date),
-                         y: .value("Precip %", p.precipProbability * 100))
-                    .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
-                         series: .value("S", "G"))
-                    .foregroundStyle(.red.opacity(0.45)).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-                    .symbol(Circle()).symbolSize(0)
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
-                         series: .value("S", "W"))
-                    .foregroundStyle(.red).interpolationMethod(.linear)
-                    .symbol(Circle()).symbolSize(0)
+            Chart {
+                ForEach(series) { p in
+                    AreaMark(x: .value("Time", p.date),
+                             y: .value("Precip %", p.precipProbability * 100))
+                        .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
+                             series: .value("S", "G"))
+                        .foregroundStyle(.red.opacity(0.45)).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                        .symbol(Circle()).symbolSize(0)
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
+                             series: .value("S", "W"))
+                        .foregroundStyle(.red).interpolationMethod(.linear)
+                        .symbol(Circle()).symbolSize(0)
+                }
+                // Prominent "now" wind/gust dots (current has no precipitation).
+                if let c = current {
+                    PointMark(x: .value("Time", c.date),
+                              y: .value("Gust", useFahrenheit ? c.windGustMPH : c.windGustKPH))
+                        .foregroundStyle(.red.opacity(0.45)).symbolSize(90)
+                    PointMark(x: .value("Time", c.date),
+                              y: .value("Wind", useFahrenheit ? c.windSpeedMPH : c.windSpeedKPH))
+                        .foregroundStyle(.red).symbolSize(90)
+                }
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))
@@ -623,6 +673,10 @@ struct HereTodayView: View {
 
 struct TenDayView: View {
     var series: [ForecastPoint]
+    /// Observed past ~24 h, drawn dashed to the left of the forecast.
+    var historic: [ForecastPoint] = []
+    /// "now" boundary point joining the dashed history to the solid forecast.
+    var current: ForecastPoint? = nil
     var progress: LoadProgress = LoadProgress()
     var nowTick: Date = .now
     var errorMessage: String? = nil
@@ -634,13 +688,30 @@ struct TenDayView: View {
 
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
+    /// Historic + "now", used for the dashed past line.
+    private var historicPlus: [ForecastPoint] {
+        historic + (current.map { [$0] } ?? [])
+    }
+    /// "now" + forecast, used for the solid future line (joins at "now").
+    private var forecastPlus: [ForecastPoint] {
+        (current.map { [$0] } ?? []) + series
+    }
+    /// All plotted points oldest→newest, for the MyFeelsLike colour background.
+    private var allPoints: [ForecastPoint] {
+        historic + (current.map { [$0] } ?? []) + series
+    }
+
+    private var earliestDate: Date? {
+        historic.first?.date ?? current?.date ?? series.first?.date
+    }
+
     private var dateDomain: ClosedRange<Date>? {
-        guard let first = series.first?.date, let last = series.last?.date else { return nil }
-        return first...last
+        guard let lo = earliestDate, let last = series.last?.date else { return nil }
+        return lo...last
     }
 
     private var startMidnight: Date? {
-        guard let first = series.first?.date else { return nil }
+        guard let first = earliestDate else { return nil }
         let cal = Calendar.current
         let midnight = cal.startOfDay(for: first)
         return first > midnight ? cal.date(byAdding: .day, value: 1, to: midnight) : midnight
@@ -663,6 +734,56 @@ struct TenDayView: View {
               Calendar.current.component(.hour, from: date) == 0 else { return "" }
         let key = TenDayView.dayFormatter.string(from: date)
         return TenDayView.dayAbbreviations[key] ?? String(key.prefix(2))
+    }
+
+    /// The four temperature lines (temp/wet-bulb/dew/apparent) over a set of
+    /// points. `suffix` keeps the historic and forecast series distinct so they
+    /// are not connected across the "now" boundary; `dash` nil = solid.
+    @ChartContentBuilder
+    private func tempLines(_ pts: [ForecastPoint], suffix: String, dash: [CGFloat]?) -> some ChartContent {
+        ForEach(pts) { p in
+            LineMark(x: .value("Time", p.date),
+                     y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
+                     series: .value("S", "A" + suffix))
+                .foregroundStyle(.blue).interpolationMethod(.linear)
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: dash ?? []))
+            LineMark(x: .value("Time", p.date),
+                     y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
+                     series: .value("S", "B" + suffix))
+                .foregroundStyle(.green).interpolationMethod(.linear)
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: dash ?? []))
+            LineMark(x: .value("Time", p.date),
+                     y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
+                     series: .value("S", "C" + suffix))
+                .foregroundStyle(.red).interpolationMethod(.linear)
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: dash ?? []))
+            LineMark(x: .value("Time", p.date),
+                     y: .value("Apparent",
+                               useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
+                     series: .value("S", "D" + suffix))
+                .foregroundStyle(.purple).interpolationMethod(.linear)
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: dash ?? []))
+        }
+    }
+
+    /// Gust (always dashed) and wind lines over a set of points. `windDash`
+    /// makes the wind line dashed for the historic pass, solid for the forecast.
+    @ChartContentBuilder
+    private func windLines(_ pts: [ForecastPoint], suffix: String, windDash: [CGFloat]?) -> some ChartContent {
+        ForEach(pts) { p in
+            LineMark(x: .value("Time", p.date),
+                     y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
+                     series: .value("S", "G" + suffix))
+                .foregroundStyle(.red.opacity(0.45)).interpolationMethod(.linear)
+                .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                .symbol(Circle()).symbolSize(0)
+            LineMark(x: .value("Time", p.date),
+                     y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
+                     series: .value("S", "W" + suffix))
+                .foregroundStyle(.red).interpolationMethod(.linear)
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: windDash ?? []))
+                .symbol(Circle()).symbolSize(0)
+        }
     }
 
     var body: some View {
@@ -702,31 +823,14 @@ struct TenDayView: View {
             ])
             .padding(.leading, 36)
 
-            Chart(series) { p in
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
-                         series: .value("S", "A"))
-                    .foregroundStyle(.blue).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Wet Bulb", useFahrenheit ? p.wetBulbF : p.wetBulbC),
-                         series: .value("S", "B"))
-                    .foregroundStyle(.green).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
-                         series: .value("S", "C"))
-                    .foregroundStyle(.red).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Apparent",
-                                   useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
-                         series: .value("S", "D"))
-                    .foregroundStyle(.purple).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+            Chart {
+                // Dashed past (historic → now), solid future (now → forecast);
+                // the two share the "now" point so the lines join.
+                tempLines(historicPlus, suffix: "h", dash: [4, 3])
+                tempLines(forecastPlus, suffix: "",  dash: nil)
             }
             .chartBackground { proxy in
-                let stops = myFeelsLikeBackgroundStops(series)
+                let stops = myFeelsLikeBackgroundStops(allPoints)
                 if !stops.isEmpty {
                     GeometryReader { geo in
                         let frame = geo[proxy.plotAreaFrame]
@@ -779,21 +883,17 @@ struct TenDayView: View {
             ])
             .padding(.leading, 36)
 
-            Chart(series) { p in
-                AreaMark(x: .value("Time", p.date),
-                         y: .value("Precip %", p.precipProbability * 100))
-                    .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
-                         series: .value("S", "G"))
-                    .foregroundStyle(.red.opacity(0.45)).interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-                    .symbol(Circle()).symbolSize(0)
-                LineMark(x: .value("Time", p.date),
-                         y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
-                         series: .value("S", "W"))
-                    .foregroundStyle(.red).interpolationMethod(.linear)
-                    .symbol(Circle()).symbolSize(0)
+            Chart {
+                // Precipitation as one continuous area across history + forecast
+                // ("now" is skipped — CurrentWeather has no precip).
+                ForEach(historic + series) { p in
+                    AreaMark(x: .value("Time", p.date),
+                             y: .value("Precip %", p.precipProbability * 100))
+                        .foregroundStyle(Color.blue.opacity(0.3).gradient).interpolationMethod(.linear)
+                }
+                // Wind/gust: dashed past, solid future, joined at "now".
+                windLines(historicPlus, suffix: "h", windDash: [4, 3])
+                windLines(forecastPlus, suffix: "",  windDash: nil)
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))

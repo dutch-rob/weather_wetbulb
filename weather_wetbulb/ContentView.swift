@@ -565,7 +565,7 @@ struct HereTodayView: View {
                 }
             }
             .chartBackground { proxy in
-                let stops = myFeelsLikeBackgroundStops(series)
+                let stops = myFeelsLikeBackgroundStops(series, domain: dateDomain)
                 if !stops.isEmpty {
                     GeometryReader { geo in
                         let frame = geo[proxy.plotAreaFrame]
@@ -830,7 +830,7 @@ struct TenDayView: View {
                 tempLines(forecastPlus, suffix: "",  dash: nil)
             }
             .chartBackground { proxy in
-                let stops = myFeelsLikeBackgroundStops(allPoints)
+                let stops = myFeelsLikeBackgroundStops(allPoints, domain: dateDomain)
                 if !stops.isEmpty {
                     GeometryReader { geo in
                         let frame = geo[proxy.plotAreaFrame]
@@ -925,20 +925,29 @@ struct TenDayView: View {
 private let chartBackgroundMaxAlpha: Double = 0.55
 
 /// Build the horizontal gradient stops representing the model's predicted
-/// score at each forecast hour. Stops are placed at fractional positions
-/// along the x-axis (one stop per hour); each stop's alpha is the model's
-/// own opacity (= leverage fade) capped by chartBackgroundMaxAlpha.
+/// score at each point. Each stop is placed by its **time** position within
+/// `domain` (so it aligns with the curves even when the domain extends past
+/// the first/last point, e.g. the 24h graph's left gap); each stop's alpha is
+/// the model's own opacity (= leverage fade) capped by chartBackgroundMaxAlpha.
 ///
 /// Returns an empty array when no point has a score (no model fitted).
-private func myFeelsLikeBackgroundStops(_ series: [ForecastPoint]) -> [Gradient.Stop] {
+private func myFeelsLikeBackgroundStops(
+    _ series: [ForecastPoint],
+    domain: ClosedRange<Date>?
+) -> [Gradient.Stop] {
     guard series.count > 1 else { return [] }
     guard series.contains(where: { $0.myFeelsLikeScore != nil }) else { return [] }
-    let last = series.count - 1
-    return series.enumerated().compactMap { (i, p) -> Gradient.Stop? in
+    // Fall back to the series' own span when no explicit domain is given.
+    let lo = domain?.lowerBound ?? series.first!.date
+    let hi = domain?.upperBound ?? series.last!.date
+    let span = hi.timeIntervalSince(lo)
+    guard span > 0 else { return [] }
+    return series.compactMap { p -> Gradient.Stop? in
         guard let score = p.myFeelsLikeScore else { return nil }
         let alpha = max(0, min(1, p.myFeelsLikeOpacity)) * chartBackgroundMaxAlpha
         let color = ColorScale.color(forScore: score).opacity(alpha)
-        return Gradient.Stop(color: color, location: CGFloat(i) / CGFloat(last))
+        let loc = max(0, min(1, p.date.timeIntervalSince(lo) / span))
+        return Gradient.Stop(color: color, location: CGFloat(loc))
     }
 }
 

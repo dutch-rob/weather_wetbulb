@@ -58,9 +58,36 @@ enum Feature: String, CaseIterable, Codable {
     case dress                    // -2…+2
     case sun                      // -1…+1
 
-    /// Candidate set for stepwise selection (excludes the anchor).
-    static var candidates: [Feature] {
-        Feature.allCases.filter { $0 != .apparentTempC }
+    // Piecewise-linear hinge terms (candidates from n ≥ 25).
+    // Each is max(0, x − h) or max(0, h − x), giving a slope change at h.
+    case hinge_cold_10     // max(0, 10 − apparentTempC)  — cold amplification below 10 °C
+    case hinge_warm_18     // max(0, apparentTempC − 18)  — warm onset above 18 °C
+    case hinge_hot_26      // max(0, apparentTempC − 26)  — heat amplification above 26 °C
+    case hinge_wind_15     // max(0, windSpeedKPH − 15)   — noticeable wind threshold
+    case hinge_uv_4        // max(0, uvIndex − 4)         — moderate UV threshold
+
+    // Interaction terms (candidates from n ≥ 40).
+    case ix_apparent_humidity   // apparentTempC × humidity
+    case ix_apparent_uv         // apparentTempC × uvIndex
+    case ix_apparent_activity   // apparentTempC × activity
+
+    /// Minimum number of ratings before this feature becomes a stepwise candidate.
+    var minimumN: Int {
+        switch self {
+        case .hinge_cold_10, .hinge_warm_18, .hinge_hot_26,
+             .hinge_wind_15, .hinge_uv_4:
+            return 25
+        case .ix_apparent_humidity, .ix_apparent_uv, .ix_apparent_activity:
+            return 40
+        default:
+            return 0
+        }
+    }
+
+    /// All features eligible as stepwise candidates for a given sample size.
+    /// Excludes the anchor (apparentTempC) and any feature whose minimumN > n.
+    static func candidates(for n: Int) -> [Feature] {
+        allCases.filter { $0 != .apparentTempC && n >= $0.minimumN }
     }
 }
 
@@ -91,6 +118,16 @@ extension Rating: FeatureSource {
         case .activity:             return Double(activity)
         case .dress:                return Double(dress)
         case .sun:                  return Double(sun)
+        // Hinges
+        case .hinge_cold_10:        return max(0, 10 - apparentTemperatureC)
+        case .hinge_warm_18:        return max(0, apparentTemperatureC - 18)
+        case .hinge_hot_26:         return max(0, apparentTemperatureC - 26)
+        case .hinge_wind_15:        return max(0, windSpeedKPH - 15)
+        case .hinge_uv_4:           return max(0, uvIndex - 4)
+        // Interactions
+        case .ix_apparent_humidity: return apparentTemperatureC * humidity
+        case .ix_apparent_uv:       return apparentTemperatureC * uvIndex
+        case .ix_apparent_activity: return apparentTemperatureC * Double(activity)
         }
     }
 }
@@ -128,6 +165,16 @@ struct ForecastFeatureSource: FeatureSource {
         case .activity:             return Double(scenario.activity)
         case .dress:                return Double(scenario.dress)
         case .sun:                  return Double(scenario.sun)
+        // Hinges
+        case .hinge_cold_10:        return max(0, 10 - p.apparentTemperatureC)
+        case .hinge_warm_18:        return max(0, p.apparentTemperatureC - 18)
+        case .hinge_hot_26:         return max(0, p.apparentTemperatureC - 26)
+        case .hinge_wind_15:        return max(0, p.windSpeedKPH - 15)
+        case .hinge_uv_4:           return max(0, p.uvIndex - 4)
+        // Interactions
+        case .ix_apparent_humidity: return p.apparentTemperatureC * p.humidity
+        case .ix_apparent_uv:       return p.apparentTemperatureC * p.uvIndex
+        case .ix_apparent_activity: return p.apparentTemperatureC * Double(scenario.activity)
         }
     }
 }
@@ -151,8 +198,8 @@ struct RegressionState: Codable {
     /// new fits always populate it.
     var invXtX: [[Double]]? = nil
 
-    /// Predicted feels-like (°C) for a feature source, using the fitted model
-    /// without any extrapolation handling.
+    /// Predicted feels-like score (0…1000) for a feature source. May return
+    /// values slightly outside [0, 1000]; callers clamp where needed.
     func predict(_ src: FeatureSource) -> Double {
         var y = coefficients[0]
         for (i, f) in selectedFeatures.enumerated() {
@@ -197,34 +244,22 @@ struct RegressionState: Codable {
         return h
     }
 
-    /// Continuous extrapolation-aware prediction. Returns a weighted
-    /// average of the model prediction and the apparent temperature,
-    /// where the weight on apparent rises linearly from 0 at h = 2m/n
-    /// to 1 at h = 3m/n.
-    ///
-    ///   • In-range queries  (h ≤ 2m/n)    → pure model.
-    ///   • Borderline range   (2m/n < h < 3m/n) → linear blend.
-    ///   • Out-of-range       (h ≥ 3m/n)    → pure apparent temperature.
-    ///
-    /// `apparentWeight` is the weight given to apparent temperature (0…1)
-    /// and can be used by the UI to flag low-confidence cells.
-    func blendedPredictionC(_ src: FeatureSource, apparentC: Double)
-        -> (value: Double, apparentWeight: Double)
-    {
-        let modelValue = predict(src)
-        guard let h = leverage(src) else {
-            return (modelValue, 0.0)
-        }
+    /// Opacity of the model prediction for `src`, based on leverage:
+    ///   • h ≤ 2m/n → 1.0 (fully visible model)
+    ///   • h ≥ 3m/n → 0.0 (invisible — model would be extrapolating)
+    ///   • In between → linear fade.
+    /// Used by the UI to fade the personalised colour overlay where the
+    /// forecast is outside the training distribution.
+    func predictionOpacity(_ src: FeatureSource) -> Double {
+        guard let h = leverage(src) else { return 1.0 }
         let mD = Double(selectedFeatures.count + 1)
         let nD = Double(ratingCount)
-        guard nD > 0 else { return (modelValue, 0.0) }
+        guard nD > 0 else { return 1.0 }
         let lower = 2.0 * mD / nD
         let upper = 3.0 * mD / nD
-        let w: Double
-        if h <= lower      { w = 0 }
-        else if h >= upper { w = 1 }
-        else               { w = (h - lower) / (upper - lower) }
-        return (modelValue * (1 - w) + apparentC * w, w)
+        if h <= lower { return 1.0 }
+        if h >= upper { return 0.0 }
+        return 1.0 - (h - lower) / (upper - lower)
     }
 }
 
@@ -232,13 +267,14 @@ struct RegressionState: Codable {
 
 enum FeelsLikeRegression {
 
-    /// Trigger threshold: at least 5 ratings AND ≥ 5 °C spread of
-    /// user-reported feels-like values.
+    /// Trigger threshold: at least 5 ratings AND ≥ 80-point spread (out of
+    /// 1000) of user-reported feels-like scores. 80 points is roughly the
+    /// score-scale equivalent of the previous 5 °C spread.
     static func canFit(ratings: [Rating]) -> Bool {
         guard ratings.count >= 5 else { return false }
-        let ys = ratings.map { $0.feelsLikeC }
+        let ys = ratings.map { $0.feelsLikeScore }
         guard let lo = ys.min(), let hi = ys.max() else { return false }
-        return (hi - lo) >= 5.0
+        return (hi - lo) >= 80.0
     }
 
     /// How many extra (beyond apparent) features the budget allows.
@@ -261,8 +297,8 @@ enum FeelsLikeRegression {
         guard var bestState = fitOLS(ratings: ratings, features: selected) else { return nil }
 
         // Forward stepwise: add up to `budget` more features.
-        let candidates = Feature.candidates
-        var remaining = Set(candidates)
+        // Candidate pool is n-aware: hinges unlock at 25, interactions at 40.
+        var remaining = Set(Feature.candidates(for: n))
         for _ in 0..<budget {
             var bestNext: (Feature, RegressionState)? = nil
             for f in remaining {
@@ -299,7 +335,7 @@ enum FeelsLikeRegression {
             for (j, f) in features.enumerated() {
                 raw[i][j] = r.value(for: f)
             }
-            y[i] = r.feelsLikeC
+            y[i] = r.feelsLikeScore
         }
 
         // Standardize columns.

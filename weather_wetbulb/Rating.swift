@@ -16,7 +16,10 @@ final class Rating {
     var placeID: UUID?
 
     // User input
-    var feelsLikeC: Double = 0          // value chosen on the color scale, °C
+    /// "Feels like" expressed as a 0…1000 colour-scale score (no temperature
+    /// units exposed to the user). 0 = coldest end of the colour bar,
+    /// 1000 = hottest end. This is the regression target.
+    var feelsLikeScore: Double = 500
     var activity: Int = 1               // 0 Not active / 1 Light / 2 Moderate / 3 Vigorous
     var dress: Int = 0                  // -2 very cold … 0 nice … +2 very warm
     var sun: Int = 0                    // +1 full sun / 0 partial / -1 shade
@@ -41,7 +44,7 @@ final class Rating {
     init(
         timestamp: Date = Date(),
         placeID: UUID? = nil,
-        feelsLikeC: Double,
+        feelsLikeScore: Double,
         activity: Int,
         dress: Int,
         sun: Int,
@@ -49,7 +52,7 @@ final class Rating {
     ) {
         self.timestamp = timestamp
         self.placeID = placeID
-        self.feelsLikeC = feelsLikeC
+        self.feelsLikeScore = feelsLikeScore
         self.activity = activity
         self.dress = dress
         self.sun = sun
@@ -68,5 +71,41 @@ final class Rating {
         self.cloudCoverHigh = snapshot.cloudCoverHigh
         self.uvIndex = snapshot.uvIndex
         self.isDaylight = snapshot.isDaylight
+    }
+
+    /// Restore a rating from a previously exported JSON file.
+    /// Preserves the original id and timestamp so re-imports are idempotent.
+    init(
+        id: UUID, timestamp: Date, placeID: UUID?,
+        feelsLikeScore: Double, activity: Int, dress: Int, sun: Int,
+        temperatureC: Double, apparentTemperatureC: Double,
+        wetBulbC: Double, dewPointC: Double, humidity: Double,
+        stationPressurePa: Double, windSpeedKPH: Double,
+        precipProbability: Double, precipitationMM: Double,
+        cloudCover: Double, cloudCoverLow: Double, cloudCoverMedium: Double,
+        cloudCoverHigh: Double, uvIndex: Double, isDaylight: Bool
+    ) {
+        self.id                   = id
+        self.timestamp            = timestamp
+        self.placeID              = placeID
+        self.feelsLikeScore       = feelsLikeScore
+        self.activity             = activity
+        self.dress                = dress
+        self.sun                  = sun
+        self.temperatureC         = temperatureC
+        self.apparentTemperatureC = apparentTemperatureC
+        self.wetBulbC             = wetBulbC
+        self.dewPointC            = dewPointC
+        self.humidity             = humidity
+        self.stationPressurePa    = stationPressurePa
+        self.windSpeedKPH         = windSpeedKPH
+        self.precipProbability    = precipProbability
+        self.precipitationMM      = precipitationMM
+        self.cloudCover           = cloudCover
+        self.cloudCoverLow        = cloudCoverLow
+        self.cloudCoverMedium     = cloudCoverMedium
+        self.cloudCoverHigh       = cloudCoverHigh
+        self.uvIndex              = uvIndex
+        self.isDaylight           = isDaylight
     }
 }

@@ -58,6 +58,25 @@ final class WatchWeatherModel: NSObject, ObservableObject, CLLocationManagerDele
                 altitude: p.altitude, horizontalAccuracy: 1, verticalAccuracy: 1, timestamp: Date())
             Task { await load(for: loc) }
         } else {
+            requestCurrentLocation()
+        }
+    }
+
+    /// Ask for a location, but only once we're actually authorized. Calling
+    /// requestLocation() while authorization is still undetermined fails with
+    /// kCLErrorDenied; instead we wait for the authorization callback, which
+    /// re-drives the fetch. This avoids the "error 1 on first launch" that
+    /// needed a relaunch to clear.
+    private func requestCurrentLocation() {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()   // fetch resumes in the callback
+        case .denied, .restricted:
+            errorText = "Location access is off. Turn it on in Watch Settings › Privacy & Security › Location Services › WetBulbCast."
+            isLoading = false
+        @unknown default:
             manager.requestLocation()
         }
     }
@@ -75,6 +94,21 @@ final class WatchWeatherModel: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     // MARK: CLLocationManagerDelegate
+
+    nonisolated func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
+        Task { @MainActor in
+            switch m.authorizationStatus {
+            case .authorizedWhenInUse, .authorizedAlways:
+                // Permission just granted — fetch now, no relaunch needed.
+                if self.selectedPlace == nil { self.requestCurrentLocation() }
+            case .denied, .restricted:
+                self.errorText = "Location access is off. Turn it on in Watch Settings › Privacy & Security › Location Services › WetBulbCast."
+                self.isLoading = false
+            default:
+                break
+            }
+        }
+    }
 
     nonisolated func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
         guard let loc = locs.last else { return }

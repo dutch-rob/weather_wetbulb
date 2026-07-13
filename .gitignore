@@ -1,0 +1,12 @@
+# Xcode build output
+build/
+DerivedData/
+
+# Xcode user state
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Claude Code agent worktrees
+.claude/worktrees/

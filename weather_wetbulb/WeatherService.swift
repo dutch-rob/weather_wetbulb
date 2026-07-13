@@ -90,6 +90,7 @@ private let sharedWeatherService = WeatherKit.WeatherService()
 final class WeatherService: ObservableObject {
     @Published var series24h: [ForecastPoint] = []
     @Published var series10d: [ForecastPoint] = []
+    @Published var current: ForecastPoint? = nil
     @Published var placeDescription: String = ""
     @Published var loadProgress: LoadProgress = LoadProgress()
     @Published var lastErrorMessage: String? = nil
@@ -102,74 +103,6 @@ final class WeatherService: ObservableObject {
     private func start(_ step: LoadStep)              { loadProgress.steps[step] = .inProgress(startedAt: Date()) }
     private func finish(_ step: LoadStep)             { loadProgress.steps[step] = .success }
     private func fail(_ step: LoadStep, error: Error) { loadProgress.steps[step] = .failure(error) }
-
-    /// Corrects sea-level pressure to station pressure at the given altitude
-    /// (barometric formula; pressure falls as altitude increases).
-    static func stationPressure(seaLevelPa: Double, altitudeM: Double, tempC: Double) -> Double {
-        seaLevelPa * pow(
-            1 - 0.0065 * altitudeM / (tempC + 0.0065 * altitudeM + 273.15), 5.257)
-    }
-
-    private func mapPoints(
-        from hours: [HourWeather],
-        start: Date, end: Date,
-        location: CLLocation
-    ) -> [ForecastPoint] {
-        hours.filter { $0.date >= start && $0.date <= end }.map { h in
-            let tempF      = h.temperature.converted(to: .fahrenheit).value
-            let tempC      = h.temperature.converted(to: .celsius).value
-            let apparentF  = h.apparentTemperature.converted(to: .fahrenheit).value
-            let apparentC  = h.apparentTemperature.converted(to: .celsius).value
-            let dewF       = h.dewPoint.converted(to: .fahrenheit).value
-            let dewC       = h.dewPoint.converted(to: .celsius).value
-            let rh         = h.humidity
-            let seaLevelPa = h.pressure.converted(to: .newtonsPerMetersSquared).value
-            let altitudeM  = location.altitude
-            let stationPa  = Self.stationPressure(seaLevelPa: seaLevelPa,
-                                                  altitudeM: altitudeM,
-                                                  tempC: tempC)
-            let wetF       = PsychrometryCalculator.psychF(pressurePa: stationPa,
-                                                           dryBulbFahrenheit: tempF,
-                                                           relativeHumidity: rh)
-            let wetC       = PsychrometryCalculator.psychC(pressurePa: stationPa,
-                                                           dryBulbCelsius: tempC,
-                                                           relativeHumidity: rh)
-            let windMPH    = h.wind.speed.converted(to: .milesPerHour).value
-            let windKPH    = h.wind.speed.converted(to: .kilometersPerHour).value
-            let precipMM   = h.precipitationAmount.converted(to: .millimeters).value
-
-            // cloudCoverByAltitude: available in WeatherKit on iOS 18+.
-            // Each property is in the 0-1 range. If this line does not compile,
-            // replace the three lines below with 0.0 and file a radar.
-            let cloudByAlt  = h.cloudCoverByAltitude
-            let cloudLow    = cloudByAlt.low
-            let cloudMid    = cloudByAlt.medium
-            let cloudHigh   = cloudByAlt.high
-
-            return ForecastPoint(
-                date:                 h.date,
-                symbolName:           h.symbolName,
-                isDaylight:           h.isDaylight,
-                uvIndex:              Double(h.uvIndex.value),
-                temperatureF:         tempF,
-                temperatureC:         tempC,
-                apparentTemperatureF: apparentF,
-                apparentTemperatureC: apparentC,
-                wetBulbF:             wetF,
-                wetBulbC:             wetC,
-                dewPointF:            dewF,
-                dewPointC:            dewC,
-                precipProbability:    Double(h.precipitationChance),
-                precipitationMM:      precipMM,
-                windSpeedMPH:         windMPH,
-                windSpeedKPH:         windKPH,
-                cloudCover:           h.cloudCover,
-                cloudCoverLow:        cloudLow,
-                cloudCoverMedium:     cloudMid,
-                cloudCoverHigh:       cloudHigh
-            )
-        }
-    }
 
     func loadFor(location: CLLocation, now: Date = .now, preserveData: Bool = false) async {
         // Only keep existing data visible when there is actually data to show.
@@ -186,6 +119,7 @@ final class WeatherService: ObservableObject {
             placeDescription = ""
             series24h        = []
             series10d        = []
+            current          = nil
         }
         finish(.location)
         start(.weather)
@@ -198,10 +132,11 @@ final class WeatherService: ObservableObject {
             finish(.weather)
 
             let hours = weather.hourlyForecast.forecast
-            series24h = mapPoints(from: hours, start: now,
+            series24h = WeatherMapping.mapPoints(from: hours, start: now,
                                    end: now.addingTimeInterval(24 * 3600), location: location)
-            series10d = mapPoints(from: hours, start: now,
+            series10d = WeatherMapping.mapPoints(from: hours, start: now,
                                    end: now.addingTimeInterval(240 * 3600), location: location)
+            current   = WeatherMapping.mapCurrent(weather.currentWeather, location: location)
             isRefreshing  = false          // new data is in; hide spinner
             lastFetchedAt = Date()
 

@@ -59,8 +59,3 @@ func dailyXAxis() -> some AxisContent {
         AxisValueLabel(format: .dateTime.weekday()).font(axisLabelFont)
     }
 }
-
-/// Whether the synced chart style is "filled" (the default) vs "classic" lines.
-func watchUseFilledStyle() -> Bool {
-    (WatchSyncReceiver.shared.payload?.chartStyle ?? "filled") != "classic"
-}

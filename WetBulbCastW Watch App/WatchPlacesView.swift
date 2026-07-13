@@ -10,9 +10,10 @@ import SwiftUI
 
 struct WatchPlacesView: View {
     @ObservedObject var model: WatchWeatherModel
+    @ObservedObject private var sync = WatchSyncReceiver.shared
     @Environment(\.dismiss) private var dismiss
 
-    private var places: [PlaceDTO] { WatchSyncReceiver.shared.payload?.places ?? [] }
+    private var places: [PlaceDTO] { sync.payload?.places ?? [] }
 
     var body: some View {
         List {

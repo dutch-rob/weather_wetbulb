@@ -10,7 +10,8 @@ import SwiftUI
 
 struct WatchTableView: View {
     @ObservedObject var model: WatchWeatherModel
-    private var useF: Bool { WatchSyncReceiver.shared.payload?.useFahrenheit ?? false }
+    @ObservedObject private var sync = WatchSyncReceiver.shared
+    private var useF: Bool { sync.payload?.useFahrenheit ?? false }
 
     private static let timeFmt: DateFormatter = {
         let df = DateFormatter()

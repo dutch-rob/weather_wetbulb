@@ -12,9 +12,10 @@ import Charts
 
 struct WatchTodayView: View {
     @ObservedObject var model: WatchWeatherModel
+    @ObservedObject private var sync = WatchSyncReceiver.shared
     @State private var showPlaces = false
-    private var useF: Bool { WatchSyncReceiver.shared.payload?.useFahrenheit ?? false }
-    private var filled: Bool { watchUseFilledStyle() }
+    private var useF: Bool { sync.payload?.useFahrenheit ?? false }
+    private var filled: Bool { (sync.payload?.chartStyle ?? "filled") != "classic" }
 
     /// Tight y-range covering the three temperature curves (+ small padding).
     private var tempYDomain: ClosedRange<Double> {

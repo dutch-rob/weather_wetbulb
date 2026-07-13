@@ -798,6 +798,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastW;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "robotex.weather-wetbulb";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -832,6 +833,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastW;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "robotex.weather-wetbulb";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

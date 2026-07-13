@@ -99,9 +99,9 @@
 			membershipExceptions = (
 				ComplicationSnapshot.swift,
 				Models.swift,
+				psychropy.swift,
 				WatchSyncPayload.swift,
 				WeatherMapping.swift,
-				psychropy.swift,
 			);
 			target = 15B9DF003005496100FB53EB /* WetBulbCastW Watch App */;
 		};
@@ -797,8 +797,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastW;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "robotex.weather-wetbulb";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -832,8 +832,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastW;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "robotex.weather-wetbulb";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

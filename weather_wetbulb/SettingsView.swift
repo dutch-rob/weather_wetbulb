@@ -37,6 +37,8 @@ struct SettingsView: View {
                 Text("“Filled areas” fills each curve as a shaded band with a marker at the current conditions (temperature green, wet bulb blue, dew point red). “Classic lines” draws them as plain lines.")
             }
 
+            IndoorSettingsSection()
+
             Section {
                 NavigationLink {
                     InfoView()

@@ -11,6 +11,11 @@ import SwiftUI
 struct weather_wetbulbApp: App {
 
     init() {
+        // Seed the default chart style FIRST — it reads whether `useFahrenheit`
+        // has ever been written as one of its "existing user" markers, so it
+        // must run before the seeding below writes that key.
+        SettingsSeeding.seedChartStyleIfNeeded()
+
         // On first launch only: choose °F or °C based on the device region.
         // The following countries / territories conventionally use Fahrenheit:
         let fahrenheitRegions: Set<String> = [

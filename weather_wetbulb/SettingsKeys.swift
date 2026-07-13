@@ -11,6 +11,19 @@ import Foundation
 enum SettingsKey {
     static let useFahrenheit = "useFahrenheit"
     static let chartStyle    = "chartStyle"
+
+    // Indoor-comfort (HomeKit) feature
+    static let indoorTrackingEnabled = "indoorTrackingEnabled"
+    static let indoorSensorIDs        = "indoorSensorIDs_v1"   // JSON [String] of selected characteristic UUIDs
+    static let homeLat                = "homeLat_v1"
+    static let homeLon                = "homeLon_v1"
+    static let homeAlt                = "homeAlt_v1"
+}
+
+/// Background-task identifier for periodic indoor sampling. Must match the
+/// value in BGTaskSchedulerPermittedIdentifiers (Info.plist).
+enum BGTask {
+    static let indoorSample = "robotex.weather-wetbulb.indoorSample"
 }
 
 /// How the forecast graphs are drawn.

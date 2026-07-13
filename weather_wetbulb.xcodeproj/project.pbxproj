@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		15B9DF0B3005496200FB53EB /* WetBulbCastW Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 15B9DF013005496100FB53EB /* WetBulbCastW Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		15B9DF1730054BFB00FB53EB /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15B9DF1630054BFB00FB53EB /* WidgetKit.framework */; };
+		15B9DF1930054BFB00FB53EB /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15B9DF1830054BFB00FB53EB /* SwiftUI.framework */; };
+		15B9DF2630054BFC00FB53EB /* WetBulbCastComplicationExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 15B9DF1430054BFB00FB53EB /* WetBulbCastComplicationExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		15DD2E872FA82B0B0058B790 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 15DD2E862FA82B0B0058B790 /* README.md */; };
 		15DD2E892FA82B230058B790 /* generate_infoview.py in Resources */ = {isa = PBXBuildFile; fileRef = 15DD2E882FA82B230058B790 /* generate_infoview.py */; };
 		15DD2E8D2FAAB1AC0058B790 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 15DD2E8C2FAAB1AC0058B790 /* LICENSE */; };
@@ -27,20 +31,96 @@
 			remoteGlobalIDString = 154C7E6C2F71BD120016AE49;
 			remoteInfo = weather_wetbulb;
 		};
+		15B9DF093005496200FB53EB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 154C7E652F71BD120016AE49 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 15B9DF003005496100FB53EB;
+			remoteInfo = "WetBulbCastW Watch App";
+		};
+		15B9DF2430054BFC00FB53EB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 154C7E652F71BD120016AE49 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 15B9DF1330054BFB00FB53EB;
+			remoteInfo = WetBulbCastComplicationExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		15B9DF0F3005496200FB53EB /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				15B9DF0B3005496200FB53EB /* WetBulbCastW Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		15B9DF2B30054BFC00FB53EB /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				15B9DF2630054BFC00FB53EB /* WetBulbCastComplicationExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		154C7E6D2F71BD120016AE49 /* weather_wetbulb.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = weather_wetbulb.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		154C7E7C2F71BD170016AE49 /* weather_wetbulbTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = weather_wetbulbTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		154C7E862F71BD170016AE49 /* weather_wetbulbUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = weather_wetbulbUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		15B9DF013005496100FB53EB /* WetBulbCastW Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "WetBulbCastW Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		15B9DF1430054BFB00FB53EB /* WetBulbCastComplicationExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WetBulbCastComplicationExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		15B9DF1630054BFB00FB53EB /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		15B9DF1830054BFB00FB53EB /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		15B9DF2D30054DCC00FB53EB /* WetBulbCastComplicationExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WetBulbCastComplicationExtension.entitlements; sourceTree = "<group>"; };
 		15DD2E862FA82B0B0058B790 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		15DD2E882FA82B230058B790 /* generate_infoview.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = generate_infoview.py; sourceTree = "<group>"; };
 		15DD2E8C2FAAB1AC0058B790 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		15B9DF2730054BFC00FB53EB /* Exceptions for "WetBulbCastComplication" folder in "WetBulbCastComplicationExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 15B9DF1330054BFB00FB53EB /* WetBulbCastComplicationExtension */;
+		};
+		15C0FFEE0000000000000001 /* Exceptions for "weather_wetbulb" folder in "WetBulbCastW Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ComplicationSnapshot.swift,
+				Models.swift,
+				WatchSyncPayload.swift,
+				WeatherMapping.swift,
+				psychropy.swift,
+			);
+			target = 15B9DF003005496100FB53EB /* WetBulbCastW Watch App */;
+		};
+		15C0FFEE0000000000000002 /* Exceptions for "weather_wetbulb" folder in "WetBulbCastComplicationExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ComplicationSnapshot.swift,
+			);
+			target = 15B9DF1330054BFB00FB53EB /* WetBulbCastComplicationExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		154C7E6F2F71BD120016AE49 /* weather_wetbulb */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				15C0FFEE0000000000000001 /* Exceptions for "weather_wetbulb" folder in "WetBulbCastW Watch App" target */,
+				15C0FFEE0000000000000002 /* Exceptions for "weather_wetbulb" folder in "WetBulbCastComplicationExtension" target */,
+			);
 			path = weather_wetbulb;
 			sourceTree = "<group>";
 		};
@@ -52,6 +132,19 @@
 		154C7E892F71BD170016AE49 /* weather_wetbulbUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = weather_wetbulbUITests;
+			sourceTree = "<group>";
+		};
+		15B9DF023005496100FB53EB /* WetBulbCastW Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "WetBulbCastW Watch App";
+			sourceTree = "<group>";
+		};
+		15B9DF1A30054BFB00FB53EB /* WetBulbCastComplication */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				15B9DF2730054BFC00FB53EB /* Exceptions for "WetBulbCastComplication" folder in "WetBulbCastComplicationExtension" target */,
+			);
+			path = WetBulbCastComplication;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -78,15 +171,35 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		15B9DEFE3005496100FB53EB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		15B9DF1130054BFB00FB53EB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				15B9DF1930054BFB00FB53EB /* SwiftUI.framework in Frameworks */,
+				15B9DF1730054BFB00FB53EB /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		154C7E642F71BD120016AE49 = {
 			isa = PBXGroup;
 			children = (
+				15B9DF2D30054DCC00FB53EB /* WetBulbCastComplicationExtension.entitlements */,
 				154C7E6F2F71BD120016AE49 /* weather_wetbulb */,
 				154C7E7F2F71BD170016AE49 /* weather_wetbulbTests */,
 				154C7E892F71BD170016AE49 /* weather_wetbulbUITests */,
+				15B9DF023005496100FB53EB /* WetBulbCastW Watch App */,
+				15B9DF1A30054BFB00FB53EB /* WetBulbCastComplication */,
+				15B9DF1530054BFB00FB53EB /* Frameworks */,
 				154C7E6E2F71BD120016AE49 /* Products */,
 				15DD2E862FA82B0B0058B790 /* README.md */,
 				15DD2E882FA82B230058B790 /* generate_infoview.py */,
@@ -100,8 +213,19 @@
 				154C7E6D2F71BD120016AE49 /* weather_wetbulb.app */,
 				154C7E7C2F71BD170016AE49 /* weather_wetbulbTests.xctest */,
 				154C7E862F71BD170016AE49 /* weather_wetbulbUITests.xctest */,
+				15B9DF013005496100FB53EB /* WetBulbCastW Watch App.app */,
+				15B9DF1430054BFB00FB53EB /* WetBulbCastComplicationExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		15B9DF1530054BFB00FB53EB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				15B9DF1630054BFB00FB53EB /* WidgetKit.framework */,
+				15B9DF1830054BFB00FB53EB /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -114,10 +238,12 @@
 				154C7E692F71BD120016AE49 /* Sources */,
 				154C7E6A2F71BD120016AE49 /* Frameworks */,
 				154C7E6B2F71BD120016AE49 /* Resources */,
+				15B9DF0F3005496200FB53EB /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				15B9DF0A3005496200FB53EB /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				154C7E6F2F71BD120016AE49 /* weather_wetbulb */,
@@ -175,6 +301,52 @@
 			productReference = 154C7E862F71BD170016AE49 /* weather_wetbulbUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		15B9DF003005496100FB53EB /* WetBulbCastW Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 15B9DF0C3005496200FB53EB /* Build configuration list for PBXNativeTarget "WetBulbCastW Watch App" */;
+			buildPhases = (
+				15B9DEFD3005496100FB53EB /* Sources */,
+				15B9DEFE3005496100FB53EB /* Frameworks */,
+				15B9DEFF3005496100FB53EB /* Resources */,
+				15B9DF2B30054BFC00FB53EB /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				15B9DF2530054BFC00FB53EB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				15B9DF023005496100FB53EB /* WetBulbCastW Watch App */,
+			);
+			name = "WetBulbCastW Watch App";
+			packageProductDependencies = (
+			);
+			productName = "WetBulbCastW Watch App";
+			productReference = 15B9DF013005496100FB53EB /* WetBulbCastW Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		15B9DF1330054BFB00FB53EB /* WetBulbCastComplicationExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 15B9DF2830054BFC00FB53EB /* Build configuration list for PBXNativeTarget "WetBulbCastComplicationExtension" */;
+			buildPhases = (
+				15B9DF1030054BFB00FB53EB /* Sources */,
+				15B9DF1130054BFB00FB53EB /* Frameworks */,
+				15B9DF1230054BFB00FB53EB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				15B9DF1A30054BFB00FB53EB /* WetBulbCastComplication */,
+			);
+			name = WetBulbCastComplicationExtension;
+			packageProductDependencies = (
+			);
+			productName = WetBulbCastComplicationExtension;
+			productReference = 15B9DF1430054BFB00FB53EB /* WetBulbCastComplicationExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -182,7 +354,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
+				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					154C7E6C2F71BD120016AE49 = {
@@ -195,6 +367,12 @@
 					154C7E852F71BD170016AE49 = {
 						CreatedOnToolsVersion = 26.3;
 						TestTargetID = 154C7E6C2F71BD120016AE49;
+					};
+					15B9DF003005496100FB53EB = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					15B9DF1330054BFB00FB53EB = {
+						CreatedOnToolsVersion = 26.6;
 					};
 				};
 			};
@@ -215,6 +393,8 @@
 				154C7E6C2F71BD120016AE49 /* weather_wetbulb */,
 				154C7E7B2F71BD170016AE49 /* weather_wetbulbTests */,
 				154C7E852F71BD170016AE49 /* weather_wetbulbUITests */,
+				15B9DF003005496100FB53EB /* WetBulbCastW Watch App */,
+				15B9DF1330054BFB00FB53EB /* WetBulbCastComplicationExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -238,6 +418,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		154C7E842F71BD170016AE49 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		15B9DEFF3005496100FB53EB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		15B9DF1230054BFB00FB53EB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -268,6 +462,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		15B9DEFD3005496100FB53EB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		15B9DF1030054BFB00FB53EB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -280,6 +488,16 @@
 			isa = PBXTargetDependency;
 			target = 154C7E6C2F71BD120016AE49 /* weather_wetbulb */;
 			targetProxy = 154C7E872F71BD170016AE49 /* PBXContainerItemProxy */;
+		};
+		15B9DF0A3005496200FB53EB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 15B9DF003005496100FB53EB /* WetBulbCastW Watch App */;
+			targetProxy = 15B9DF093005496200FB53EB /* PBXContainerItemProxy */;
+		};
+		15B9DF2530054BFC00FB53EB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 15B9DF1330054BFB00FB53EB /* WetBulbCastComplicationExtension */;
+			targetProxy = 15B9DF2430054BFC00FB53EB /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -567,6 +785,142 @@
 			};
 			name = Release;
 		};
+		15B9DF0D3005496200FB53EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "WetBulbCastW Watch App/WetBulbCastW Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 96ND29QYH3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastW;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "robotex.weather-wetbulb";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		15B9DF0E3005496200FB53EB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "WetBulbCastW Watch App/WetBulbCastW Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 96ND29QYH3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastW;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "robotex.weather-wetbulb";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		15B9DF2930054BFC00FB53EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WetBulbCastComplicationExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 96ND29QYH3;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WetBulbCastComplication/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastComplication;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp.ComplicationExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		15B9DF2A30054BFC00FB53EB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WetBulbCastComplicationExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 96ND29QYH3;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WetBulbCastComplication/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCastComplication;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp.ComplicationExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -602,6 +956,24 @@
 			buildConfigurations = (
 				154C7E972F71BD170016AE49 /* Debug */,
 				154C7E982F71BD170016AE49 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		15B9DF0C3005496200FB53EB /* Build configuration list for PBXNativeTarget "WetBulbCastW Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				15B9DF0D3005496200FB53EB /* Debug */,
+				15B9DF0E3005496200FB53EB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		15B9DF2830054BFC00FB53EB /* Build configuration list for PBXNativeTarget "WetBulbCastComplicationExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				15B9DF2930054BFC00FB53EB /* Debug */,
+				15B9DF2A30054BFC00FB53EB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -11,9 +11,10 @@ import Charts
 
 struct WatchTenDayView: View {
     @ObservedObject var model: WatchWeatherModel
+    @ObservedObject private var sync = WatchSyncReceiver.shared
     @State private var showPlaces = false
-    private var useF: Bool { WatchSyncReceiver.shared.payload?.useFahrenheit ?? false }
-    private var filled: Bool { watchUseFilledStyle() }
+    private var useF: Bool { sync.payload?.useFahrenheit ?? false }
+    private var filled: Bool { (sync.payload?.chartStyle ?? "filled") != "classic" }
 
     /// Observed past + forecast, oldest → newest — so both charts span the same
     /// range and the first daily column is complete (full bar).

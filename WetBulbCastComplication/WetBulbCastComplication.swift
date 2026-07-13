@@ -20,13 +20,17 @@ import SwiftUI
 
 // MARK: - Wet-bulb comfort color
 
-/// RGB anchors for the wet-bulb comfort scale (°C). Interpolated linearly.
+/// RGB anchors for the wet-bulb comfort scale (°C), interpolated linearly.
+/// Wet bulb is a much harsher scale than dry bulb: ~20 °C (68 °F) already feels
+/// oppressive and humid, and the low-30s °C approach the human survival limit.
+/// So the scale is anchored with 20 °C at mid-orange (unpleasant), not benign.
 private let wbStops: [(t: Double, r: Double, g: Double, b: Double)] = [
-    (10, 0.30, 0.80, 0.90),   // cool — cyan
-    (18, 0.30, 0.80, 0.30),   // comfortable — green
-    (24, 0.95, 0.85, 0.20),   // warm — yellow
-    (28, 0.95, 0.55, 0.15),   // hot — orange
-    (32, 0.90, 0.20, 0.20),   // dangerous — red
+    (4,  0.35, 0.78, 0.92),   // cold — cyan
+    (10, 0.30, 0.80, 0.35),   // comfortable — green
+    (15, 0.95, 0.85, 0.20),   // muggy — yellow
+    (20, 0.96, 0.55, 0.15),   // unpleasant/humid — orange (anchor)
+    (25, 0.88, 0.20, 0.18),   // oppressive — red
+    (31, 0.50, 0.06, 0.12),   // dangerous — deep red
 ]
 
 private func wetBulbRGB(_ c: Double) -> (r: Double, g: Double, b: Double) {

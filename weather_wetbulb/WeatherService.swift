@@ -103,6 +103,13 @@ final class WeatherService: ObservableObject {
     private func finish(_ step: LoadStep)             { loadProgress.steps[step] = .success }
     private func fail(_ step: LoadStep, error: Error) { loadProgress.steps[step] = .failure(error) }
 
+    /// Corrects sea-level pressure to station pressure at the given altitude
+    /// (barometric formula; pressure falls as altitude increases).
+    static func stationPressure(seaLevelPa: Double, altitudeM: Double, tempC: Double) -> Double {
+        seaLevelPa * pow(
+            1 - 0.0065 * altitudeM / (tempC + 0.0065 * altitudeM + 273.15), 5.257)
+    }
+
     private func mapPoints(
         from hours: [HourWeather],
         start: Date, end: Date,
@@ -118,8 +125,9 @@ final class WeatherService: ObservableObject {
             let rh         = h.humidity
             let seaLevelPa = h.pressure.converted(to: .newtonsPerMetersSquared).value
             let altitudeM  = location.altitude
-            let stationPa  = seaLevelPa * pow(
-                1 - 0.0065 * altitudeM / (tempC + 0.0065 * altitudeM + 273.15), -5.257)
+            let stationPa  = Self.stationPressure(seaLevelPa: seaLevelPa,
+                                                  altitudeM: altitudeM,
+                                                  tempC: tempC)
             let wetF       = PsychrometryCalculator.psychF(pressurePa: stationPa,
                                                            dryBulbFahrenheit: tempF,
                                                            relativeHumidity: rh)

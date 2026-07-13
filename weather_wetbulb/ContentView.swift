@@ -168,6 +168,7 @@ struct ContentView: View {
             tabLabel("24 hour forecast")
             HereTodayView(
                 series: weather.isRefreshing ? [] : weather.series24h,
+                current: weather.isRefreshing ? nil : weather.current,
                 progress: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,

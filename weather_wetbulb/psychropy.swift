@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 /// Translated from `psychropy.py`.
 /// Computes wet-bulb temperature in Fahrenheit from:
@@ -163,62 +162,6 @@ enum PsychrometryCalculator {
 
     private static func normalizedRelativeHumidity(_ value: Double) -> Double {
         value > 1.0 ? value / 100.0 : value
-    }
-}
-
-struct PsychropyView: View {
-    @State private var pressurePaText = "101420"
-    @State private var dryBulbFahrenheitText = "64"
-    @State private var relativeHumidityText = "0.55"
-    @State private var resultText = "Wet-bulb temperature will appear here."
-    @State private var errorText: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Inputs") {
-                    TextField("Pressure (Pa)", text: $pressurePaText)
-                    TextField("Dry Bulb Temperature (degF)", text: $dryBulbFahrenheitText)
-                    TextField("Relative Humidity (fraction or %)", text: $relativeHumidityText)
-                }
-
-                Section("Result") {
-                    Text(resultText)
-
-                    if let errorText {
-                        Text(errorText)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Button("Calculate Wet Bulb", action: calculate)
-            }
-            .navigationTitle("Psychropy")
-        }
-    }
-
-    private func calculate() {
-        guard let pressurePa = Double(pressurePaText),
-              let dryBulbFahrenheit = Double(dryBulbFahrenheitText),
-              let relativeHumidity = Double(relativeHumidityText) else {
-            errorText = "Enter numeric values for pressure, dry-bulb temperature, and relative humidity."
-            return
-        }
-
-        let wetBulbFahrenheit = PsychrometryCalculator.psychF(
-            pressurePa: pressurePa,
-            dryBulbFahrenheit: dryBulbFahrenheit,
-            relativeHumidity: relativeHumidity
-        )
-
-        resultText = String(format: "Wet-bulb temperature: %.3f degF", wetBulbFahrenheit)
-        errorText = nil
-    }
-}
-
-struct PsychropyView_Previews: PreviewProvider {
-    static var previews: some View {
-        PsychropyView()
     }
 }
 

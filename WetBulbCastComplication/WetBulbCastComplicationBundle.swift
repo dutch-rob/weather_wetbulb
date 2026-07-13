@@ -12,5 +12,6 @@ import SwiftUI
 struct WetBulbCastComplicationBundle: WidgetBundle {
     var body: some Widget {
         WetBulbCastComplication()
+        WetBulbCastCircularComplication()
     }
 }

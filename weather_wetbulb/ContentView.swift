@@ -17,6 +17,7 @@ struct ContentView: View {
     //              3 = table (real), 4 = 24h phantom  — for circular wrap.
     @State private var selectedTab = 1
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
+    @AppStorage(SettingsKey.chartStyle) private var chartStyleRaw = ChartStyle.filled.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
     private var displayTitle: String {
@@ -126,6 +127,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            pushToWatch()
             // Auto-refresh when returning from background if data is ≥ 30 min old.
             if let fetched = weather.lastFetchedAt,
                Date().timeIntervalSince(fetched) > 1800,
@@ -133,11 +135,28 @@ struct ContentView: View {
                 Task { await loadWeather(preserveData: true) }
             }
         }
+        // Keep the watch in sync whenever the settings or places change.
+        .onChange(of: useFahrenheit) { _, _ in pushToWatch() }
+        .onChange(of: chartStyleRaw) { _, _ in pushToWatch() }
+        .onChange(of: places.places) { _, _ in pushToWatch() }
         .task {
+            PhoneWatchSync.shared.start()
+            pushToWatch()
             await loadWeather()
             places.refreshWeatherIfNeeded()
         }
         .onReceive(progressTimer) { nowTick = $0 }
+    }
+
+    /// Push the current display settings + saved places to the watch.
+    private func pushToWatch() {
+        let dtos = places.places.map {
+            PlaceDTO(id: $0.id, name: $0.name,
+                     latitude: $0.latitude, longitude: $0.longitude, altitude: $0.altitude)
+        }
+        PhoneWatchSync.shared.update(useFahrenheit: useFahrenheit,
+                                     chartStyle: chartStyleRaw,
+                                     places: dtos)
     }
 
     @ViewBuilder

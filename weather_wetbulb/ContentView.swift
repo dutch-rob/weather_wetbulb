@@ -12,7 +12,7 @@ struct ContentView: View {
     @State private var nowTick: Date = .now
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var showPlaces = false
-    @State private var showInfo   = false
+    @State private var showSettings = false
     // Tab indices: 0 = table phantom, 1 = 24h (real), 2 = 10d (real),
     //              3 = table (real), 4 = 24h phantom  — for circular wrap.
     @State private var selectedTab = 1
@@ -84,9 +84,9 @@ struct ContentView: View {
 
                     Spacer()
 
-                    // Info button – bottom-right corner
-                    Button { showInfo = true } label: {
-                        Image(systemName: "info.circle")
+                    // Settings button – bottom-right corner
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape")
                             .font(.title3)
                             .padding(.horizontal)
                             .padding(.vertical, 10)
@@ -110,9 +110,9 @@ struct ContentView: View {
             }
             .presentationDetents([.large])
         }
-        .sheet(isPresented: $showInfo) {
+        .sheet(isPresented: $showSettings) {
             NavigationStack {
-                InfoView()
+                SettingsView()
             }
             .presentationDetents([.large])
         }

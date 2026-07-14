@@ -88,7 +88,9 @@ final class IndoorSamplingCoordinator {
         sample.indoorHumidity = indoor.humidity
         sample.indoorSensorCount = indoor.sensorCount
         sample.indoorReadingsJSON = indoor.perSensorJSON
-        sample.hvacMode = indoor.hvacMode
+        // Prefer a live HomeKit climate reading; otherwise use the latest
+        // manually-logged thermostat state (e.g. a Nest not in HomeKit).
+        sample.hvacMode = indoor.hvacMode ?? latestHVACMode(context: context)
         sample.hvacTargetTempC = indoor.hvacTargetTempC
 
         if let loc = homeLocation(),
@@ -129,11 +131,23 @@ final class IndoorSamplingCoordinator {
         return (try? context.fetch(d))?.first?.isOn
     }
 
-    // MARK: Cooler log
+    private func latestHVACMode(context: ModelContext) -> Int? {
+        var d = FetchDescriptor<HVACEvent>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        d.fetchLimit = 1
+        return (try? context.fetch(d))?.first?.mode
+    }
+
+    // MARK: Manual logs
 
     /// Record a manual evaporative-cooler on/off event.
     func logCooler(on: Bool, context: ModelContext) {
         context.insert(CoolerEvent(isOn: on, source: 0))
+        try? context.save()
+    }
+
+    /// Record a manual thermostat state (0 off, 1 heat, 2 cool).
+    func logHVAC(mode: Int, context: ModelContext) {
+        context.insert(HVACEvent(mode: mode, source: 0))
         try? context.save()
     }
 

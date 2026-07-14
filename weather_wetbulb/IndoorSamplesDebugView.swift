@@ -30,9 +30,11 @@ struct IndoorSamplesDebugView: View {
                     Text(Self.fmt.string(from: s.date)).font(.subheadline).bold()
                     HStack(spacing: 10) {
                         Text("In: \(temp(s.indoorTempC)) / \(rh(s.indoorHumidity))")
-                        if let on = s.coolerOn {
-                            Text(on ? "cooler on" : "cooler off")
-                                .foregroundStyle(on ? .blue : .secondary)
+                        if let on = s.coolerOn, on {
+                            Text("cooler").foregroundStyle(.blue)
+                        }
+                        if let hvac = s.hvacMode, hvac != 0 {
+                            Text(hvac == 1 ? "heat" : "AC").foregroundStyle(.orange)
                         }
                     }
                     .font(.caption)

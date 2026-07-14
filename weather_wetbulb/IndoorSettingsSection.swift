@@ -14,9 +14,11 @@ struct IndoorSettingsSection: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \ComfortSample.date, order: .reverse) private var samples: [ComfortSample]
     @Query(sort: \CoolerEvent.date, order: .reverse) private var coolerEvents: [CoolerEvent]
+    @Query(sort: \HVACEvent.date, order: .reverse) private var hvacEvents: [HVACEvent]
     @ObservedObject private var home = HomeKitService.shared
 
     private var coolerOn: Bool { coolerEvents.first?.isOn ?? false }
+    private var hvacMode: Int { hvacEvents.first?.mode ?? 0 }
 
     private static let fmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "MMM d, HH:mm"; return f
@@ -46,6 +48,17 @@ struct IndoorSettingsSection: View {
                     Label("Evaporative cooler is on", systemImage: "wind")
                 }
 
+                Picker(selection: Binding(
+                    get: { hvacMode },
+                    set: { IndoorSamplingCoordinator.shared.logHVAC(mode: $0, context: context) }
+                )) {
+                    Text("Off").tag(0)
+                    Text("Heat").tag(1)
+                    Text("AC").tag(2)
+                } label: {
+                    Label("Thermostat", systemImage: "thermometer.medium")
+                }
+
                 LabeledContent("Samples collected", value: "\(samples.count)")
                 if let last = samples.first?.date {
                     LabeledContent("Last sample", value: Self.fmt.string(from: last))
@@ -60,7 +73,7 @@ struct IndoorSettingsSection: View {
         } header: {
             Text("Indoor comfort (beta)")
         } footer: {
-            Text("Records your indoor temperature/humidity from HomeKit alongside outdoor weather, to later estimate evaporative-cooler comfort. Log the cooler on/off so the model can learn its effect. Sampling happens while the app is open (about every 15 minutes) and occasionally in the background, so collection is faster the more you use the app.")
+            Text("Records your indoor temperature/humidity from HomeKit alongside outdoor weather, to later estimate evaporative-cooler comfort. Log the cooler on/off — and the thermostat state if it isn't in HomeKit (e.g. a Nest) — so the model can separate their effects. Sampling happens while the app is open (about every 15 minutes) and occasionally in the background, so collection is faster the more you use the app.")
         }
     }
 }

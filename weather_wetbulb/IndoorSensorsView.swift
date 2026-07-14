@@ -49,8 +49,20 @@ struct IndoorSensorsView: View {
                 let inHome = home.sensors.filter { $0.homeName == homeName }
                 Section {
                     if inHome.isEmpty {
-                        Text("No trackable sensors here (or not reachable — a remote home needs a home hub).")
-                            .font(.footnote).foregroundStyle(.secondary)
+                        let accs = home.accessoriesByHome[homeName] ?? []
+                        if accs.isEmpty {
+                            Text("No accessories loaded yet — pull down to refresh.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("No readable temperature/humidity sensors here.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                Text("Accessories found: \(accs.joined(separator: ", "))")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                Text("Note: a HomePod's built-in temperature/humidity sensor isn't shared with third-party apps — only a standalone HomeKit sensor can be tracked.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     ForEach(inHome) { sensor in
                         Button { toggle(sensor.id) } label: {

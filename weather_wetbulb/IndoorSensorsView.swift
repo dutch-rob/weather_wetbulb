@@ -85,6 +85,11 @@ struct IndoorSensorsView: View {
             }
         }
         .onAppear { home.start() }
+        .onDisappear {
+            // Take a sample right away with the new selection, so the count
+            // updates promptly instead of waiting for the next 15-min tick.
+            Task { await IndoorSamplingCoordinator.shared.sampleIfDue(force: true) }
+        }
     }
 
     private func toggle(_ id: String) {

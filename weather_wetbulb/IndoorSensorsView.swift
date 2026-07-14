@@ -26,10 +26,6 @@ struct IndoorSensorsView: View {
     @ObservedObject private var home = HomeKitService.shared
     @State private var selected: Set<String> = IndoorSelection.load()
 
-    private var rooms: [String] {
-        Array(Set(home.sensors.map(\.roomName))).sorted()
-    }
-
     var body: some View {
         List {
             if home.didLoad && !home.isAuthorized {
@@ -43,33 +39,51 @@ struct IndoorSensorsView: View {
             if home.sensors.isEmpty {
                 Section {
                     Text(home.didLoad
-                         ? "No temperature or humidity accessories found in HomeKit."
+                         ? "No temperature or humidity accessories found yet. Pull to refresh if a home is still loading."
                          : "Looking for HomeKit accessories…")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
 
-            ForEach(rooms, id: \.self) { room in
-                Section(room) {
-                    ForEach(home.sensors.filter { $0.roomName == room }) { sensor in
+            ForEach(home.homeNames, id: \.self) { homeName in
+                let inHome = home.sensors.filter { $0.homeName == homeName }
+                Section {
+                    if inHome.isEmpty {
+                        Text("No trackable sensors here (or not reachable — a remote home needs a home hub).")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    ForEach(inHome) { sensor in
                         Button { toggle(sensor.id) } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(sensor.accessoryName).foregroundStyle(.primary)
-                                    Text(sensor.kind.title).font(.caption).foregroundStyle(.secondary)
+                                    Text("\(sensor.roomName) · \(sensor.kind.title)")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
+                                if !sensor.isReachable {
+                                    Image(systemName: "wifi.slash")
+                                        .font(.caption).foregroundStyle(.orange)
+                                }
                                 if selected.contains(sensor.id) {
                                     Image(systemName: "checkmark").foregroundStyle(.tint)
                                 }
                             }
                         }
                     }
+                } header: {
+                    Text(homeName)
                 }
             }
         }
         .navigationTitle("Indoor sensors")
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable { home.rescan() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { home.rescan() } label: { Image(systemName: "arrow.clockwise") }
+            }
+        }
         .onAppear { home.start() }
     }
 

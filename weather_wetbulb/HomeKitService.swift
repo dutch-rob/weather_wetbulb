@@ -59,6 +59,10 @@ final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate, H
     /// Names of all homes HomeKit knows about (even ones with no matching
     /// sensors), so the picker can show "found this home but nothing to track".
     @Published private(set) var homeNames: [String] = []
+    /// Diagnostic: every accessory name HomeKit exposes per home (regardless of
+    /// whether it has trackable characteristics), so the picker can explain a
+    /// home that lists no usable sensors.
+    @Published private(set) var accessoriesByHome: [String: [String]] = [:]
 
     private var manager: HMHomeManager?
     /// Runtime map id → live characteristic, rebuilt whenever homes change.
@@ -103,8 +107,10 @@ final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate, H
         var found: [DiscoveredSensor] = []
         var map: [String: HMCharacteristic] = [:]
 
+        var accByHome: [String: [String]] = [:]
         for home in mgr.homes {
             home.delegate = self   // catch accessories that load later
+            accByHome[home.name] = home.accessories.map(\.name)
             for accessory in home.accessories {
                 let room = accessory.room?.name ?? home.name
                 for service in accessory.services {
@@ -120,6 +126,7 @@ final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate, H
             }
         }
         homeNames = mgr.homes.map(\.name).sorted()
+        accessoriesByHome = accByHome
         sensors = found.sorted { ($0.homeName, $0.roomName, $0.label) < ($1.homeName, $1.roomName, $1.label) }
         characteristics = map
         didLoad = true

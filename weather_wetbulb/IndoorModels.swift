@@ -21,7 +21,7 @@ import SwiftData
 enum IndoorStore {
     static let container: ModelContainer = {
         do {
-            return try ModelContainer(for: ComfortSample.self, CoolerEvent.self)
+            return try ModelContainer(for: ComfortSample.self, CoolerEvent.self, HVACEvent.self)
         } catch {
             fatalError("Failed to create ComfortSample ModelContainer: \(error)")
         }
@@ -82,6 +82,24 @@ final class CoolerEvent {
     init(date: Date = Date(), isOn: Bool, source: Int = 0) {
         self.date = date
         self.isOn = isOn
+        self.source = source
+    }
+}
+
+/// A manually-logged thermostat (heater/AC) state, for homes whose thermostat
+/// isn't in HomeKit (e.g. a Nest). Used as the HVAC covariate when no HomeKit
+/// climate reading is available, so the model can separate AC/heat effects from
+/// the evaporative cooler. Mode: 0 off/idle, 1 heating, 2 cooling.
+@Model
+final class HVACEvent {
+    var date: Date = Date()
+    var mode: Int = 0
+    /// 0 = manual, 1 = inferred (future).
+    var source: Int = 0
+
+    init(date: Date = Date(), mode: Int, source: Int = 0) {
+        self.date = date
+        self.mode = mode
         self.source = source
     }
 }

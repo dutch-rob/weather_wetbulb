@@ -30,7 +30,11 @@ struct DiscoveredSensor: Identifiable, Hashable {
     let id: String
     let accessoryName: String
     let roomName: String
+    let homeName: String
     let kind: Kind
+    /// Whether the accessory is currently reachable (readable). Remote homes
+    /// without a home hub read as unreachable.
+    let isReachable: Bool
 
     var label: String { "\(accessoryName) — \(kind.title)" }
 }
@@ -46,12 +50,15 @@ struct IndoorAggregate {
 }
 
 @MainActor
-final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate {
+final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate, HMHomeDelegate {
     static let shared = HomeKitService()
 
     @Published private(set) var sensors: [DiscoveredSensor] = []
     @Published private(set) var isAuthorized = false
     @Published private(set) var didLoad = false
+    /// Names of all homes HomeKit knows about (even ones with no matching
+    /// sensors), so the picker can show "found this home but nothing to track".
+    @Published private(set) var homeNames: [String] = []
 
     private var manager: HMHomeManager?
     /// Runtime map id → live characteristic, rebuilt whenever homes change.
@@ -67,15 +74,29 @@ final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate {
         manager?.delegate = self
     }
 
+    /// Re-scan on demand (e.g. a home finished loading after the first pass).
+    func rescan() {
+        if let m = manager { rebuild(from: m) }
+    }
+
     // MARK: HMHomeManagerDelegate
 
     func homeManagerDidUpdateHomes(_ mgr: HMHomeManager) {
         rebuild(from: mgr)
     }
 
+    func homeManager(_ mgr: HMHomeManager, didAdd home: HMHome) { rebuild(from: mgr) }
+    func homeManager(_ mgr: HMHomeManager, didRemove home: HMHome) { rebuild(from: mgr) }
+
     func homeManager(_ mgr: HMHomeManager, didUpdate status: HMHomeManagerAuthorizationStatus) {
         isAuthorized = status.contains(.authorized)
     }
+
+    // MARK: HMHomeDelegate (accessories loading/changing after the first pass)
+
+    func home(_ home: HMHome, didAdd accessory: HMAccessory) { rescan() }
+    func home(_ home: HMHome, didRemove accessory: HMAccessory) { rescan() }
+    func home(_ home: HMHome, didUpdate room: HMRoom, for accessory: HMAccessory) { rescan() }
 
     private func rebuild(from mgr: HMHomeManager) {
         isAuthorized = mgr.authorizationStatus.contains(.authorized)
@@ -83,20 +104,23 @@ final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate {
         var map: [String: HMCharacteristic] = [:]
 
         for home in mgr.homes {
+            home.delegate = self   // catch accessories that load later
             for accessory in home.accessories {
                 let room = accessory.room?.name ?? home.name
                 for service in accessory.services {
                     for c in service.characteristics {
                         guard let kind = Self.kind(for: c.characteristicType) else { continue }
                         let id = c.uniqueIdentifier.uuidString
-                        found.append(DiscoveredSensor(id: id, accessoryName: accessory.name,
-                                                      roomName: room, kind: kind))
+                        found.append(DiscoveredSensor(
+                            id: id, accessoryName: accessory.name, roomName: room,
+                            homeName: home.name, kind: kind, isReachable: accessory.isReachable))
                         map[id] = c
                     }
                 }
             }
         }
-        sensors = found.sorted { ($0.roomName, $0.label) < ($1.roomName, $1.label) }
+        homeNames = mgr.homes.map(\.name).sorted()
+        sensors = found.sorted { ($0.homeName, $0.roomName, $0.label) < ($1.homeName, $1.roomName, $1.label) }
         characteristics = map
         didLoad = true
     }

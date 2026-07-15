@@ -83,6 +83,18 @@ final class HomeKitService: NSObject, ObservableObject, HMHomeManagerDelegate, H
         if let m = manager { rebuild(from: m) }
     }
 
+    /// Start HomeKit if needed and wait (up to `timeout`) until homes have
+    /// loaded, so a sample taken right at launch / activation doesn't read an
+    /// empty accessory database and skip.
+    func ensureReady(timeout: TimeInterval = 6) async {
+        start()
+        guard !didLoad else { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        while !didLoad && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 200_000_000)   // 0.2s; yields to the delegate
+        }
+    }
+
     // MARK: HMHomeManagerDelegate
 
     func homeManagerDidUpdateHomes(_ mgr: HMHomeManager) {

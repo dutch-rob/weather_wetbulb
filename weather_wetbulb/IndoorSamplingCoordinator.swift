@@ -73,9 +73,15 @@ final class IndoorSamplingCoordinator {
     func sampleNow(context: ModelContext) async {
         guard enabled else { return }
         let ids = selectedSensorIDs
-        let indoor = ids.isEmpty
-            ? IndoorAggregate()
-            : await HomeKitService.shared.readSelectedSensors(ids: ids)
+        let indoor: IndoorAggregate
+        if ids.isEmpty {
+            indoor = IndoorAggregate()
+        } else {
+            // HomeKit may not be started/loaded yet on a fresh launch — wait for
+            // it before reading, otherwise the read finds nothing and we skip.
+            await HomeKitService.shared.ensureReady()
+            indoor = await HomeKitService.shared.readSelectedSensors(ids: ids)
+        }
 
         // Skip empty samples entirely (no indoor reading and no way to pair).
         guard indoor.tempC != nil || indoor.humidity != nil else {

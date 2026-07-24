@@ -31,6 +31,17 @@ struct WatchTenDayView: View {
         return (lo - pad)...(hi + pad)
     }
 
+    /// y-range for the wind/precip chart, anchored at 0.
+    private var windYDomain: ClosedRange<Double> {
+        let vals = allPoints.flatMap { p -> [Double] in
+            [p.precipProbability * 100,
+             useF ? p.windGustMPH : p.windGustKPH,
+             useF ? p.windSpeedMPH : p.windSpeedKPH]
+        }
+        let hi = vals.max() ?? 1
+        return 0...(hi + max(1, hi * 0.08))
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -141,6 +152,11 @@ struct WatchTenDayView: View {
                     .foregroundStyle(.red).interpolationMethod(.linear)
             }
         }
+        // Filled style hangs the areas from the top (0 at top), matching the
+        // phone; classic keeps 0 at the bottom.
+        .chartYScale(domain: filled
+                     ? [windYDomain.upperBound, windYDomain.lowerBound]
+                     : [windYDomain.lowerBound, windYDomain.upperBound])
         .chartYAxis { plainYAxis() }
         .chartXAxis { dailyXAxis() }
     }

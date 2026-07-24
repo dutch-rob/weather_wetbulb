@@ -35,6 +35,9 @@ struct HereTodayView: View {
     @AppStorage(GraphKey.wind)     private var graphWind      = true
     @AppStorage(GraphKey.gust)     private var graphGust      = true
 
+    /// Time the user is scrubbing to (long-press on a chart). nil = not scrubbing.
+    @State private var scrubDate: Date? = nil
+
     private var axisInk: Color { .primary }
 
     private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
@@ -89,6 +92,79 @@ struct HereTodayView: View {
 
     private func hourLabel(for date: Date) -> String {
         clockHourLabel(Calendar.current.component(.hour, from: date), use12: use12Hour)
+    }
+
+    // MARK: - Scrubbing
+
+    private var scrubPoint: ForecastPoint? {
+        guard let t = scrubDate else { return nil }
+        return nearestForecastPoint(to: t, in: series)
+    }
+
+    private var scrubFraction: Double {
+        guard let t = scrubDate, let dom = filledDateDomain else { return 0.5 }
+        let total = dom.upperBound.timeIntervalSince(dom.lowerBound)
+        guard total > 0 else { return 0.5 }
+        return min(1, max(0, t.timeIntervalSince(dom.lowerBound) / total))
+    }
+
+    private func scrubTimeText(_ date: Date) -> String {
+        let h = Calendar.current.component(.hour, from: date)
+        if use12Hour {
+            if h == 0 { return "12 am" }
+            if h == 12 { return "noon" }
+            return h < 12 ? "\(h) am" : "\(h - 12) pm"
+        }
+        return String(format: "%02d:00", h)
+    }
+
+    private func updateScrub(atX xLocation: CGFloat, proxy: ChartProxy, geo: GeometryProxy) {
+        guard let plotFrame = proxy.plotFrame else { return }
+        let x = xLocation - geo[plotFrame].origin.x
+        guard let date = proxy.value(atX: x, as: Date.self) else { return }
+        scrubDate = nearestForecastPoint(to: date, in: series)?.date
+    }
+
+    /// Draws the dashed scrub line at the current time and hosts the long-press
+    /// (to drop/move it) + a drag layer (active only while scrubbing). Added as
+    /// a chartOverlay so it works identically in both chart styles.
+    @ViewBuilder
+    private func scrubOverlay(_ proxy: ChartProxy) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                if let t = scrubDate, let plotFrame = proxy.plotFrame,
+                   let x = proxy.position(forX: t) {
+                    let plot = geo[plotFrame]
+                    Path { p in
+                        p.move(to: CGPoint(x: plot.minX + x, y: plot.minY))
+                        p.addLine(to: CGPoint(x: plot.minX + x, y: plot.maxY))
+                    }
+                    .stroke(axisInk.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+                LongPressLocator { loc, state in
+                    if state == .began || state == .changed {
+                        updateScrub(atX: loc.x, proxy: proxy, geo: geo)
+                    }
+                }
+                if scrubDate != nil {
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0)
+                            .onChanged { updateScrub(atX: $0.location.x, proxy: proxy, geo: geo) })
+                }
+            }
+        }
+    }
+
+    /// The readout card HUD, placed opposite the scrub line so the graph under
+    /// the line stays visible.
+    @ViewBuilder
+    private var scrubReadoutHUD: some View {
+        if let p = scrubPoint {
+            ScrubReadoutCard(point: p, timeText: scrubTimeText(p.date),
+                             useFahrenheit: useFahrenheit) { scrubDate = nil }
+                .padding(.top, 6).padding(.horizontal, 6)
+                .transition(.opacity)
+        }
     }
 
     var body: some View {
@@ -255,6 +331,7 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
             // In-plot unit annotation so the chart area doesn't shrink.
             .overlay(alignment: .topLeading) {
                 Text(useFahrenheit ? "°F" : "°C")
@@ -263,6 +340,7 @@ struct HereTodayView: View {
                     .padding(.leading, 4)
                     .padding(.top, 14)
             }
+            .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
             .frame(height: height - 20)
         }
     }
@@ -342,6 +420,7 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
 
             ChartLegendRow(entries: filledWindLegend, ink: axisInk)
@@ -402,6 +481,8 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
+            .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
             .frame(height: height - 20)
         }
     }
@@ -452,6 +533,7 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
         }
     }

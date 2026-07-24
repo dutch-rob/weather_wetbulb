@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Shared components
 
@@ -155,5 +156,87 @@ extension View {
     @ViewBuilder
     func ifLet<T, Content: View>(_ value: T?, transform: (Self, T) -> Content) -> some View {
         if let v = value { transform(self, v) } else { self }
+    }
+}
+
+// MARK: - Scrubber
+
+/// The forecast point nearest a given time.
+func nearestForecastPoint(to date: Date, in series: [ForecastPoint]) -> ForecastPoint? {
+    series.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+}
+
+/// A UIKit long-press recognizer that reports its location + state and
+/// coexists with SwiftUI's pager swipe / scroll (recognizes simultaneously),
+/// so a long press can drop a scrub line without breaking normal gestures.
+struct LongPressLocator: UIViewRepresentable {
+    var minimumDuration: Double = 0.3
+    var onEvent: (CGPoint, UIGestureRecognizer.State) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView()
+        v.backgroundColor = .clear
+        let lp = UILongPressGestureRecognizer(target: context.coordinator,
+                                              action: #selector(Coordinator.handle(_:)))
+        lp.minimumPressDuration = minimumDuration
+        lp.delegate = context.coordinator
+        v.addGestureRecognizer(lp)
+        return v
+    }
+    func updateUIView(_ v: UIView, context: Context) { context.coordinator.onEvent = onEvent }
+    func makeCoordinator() -> Coordinator { Coordinator(onEvent) }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onEvent: (CGPoint, UIGestureRecognizer.State) -> Void
+        init(_ onEvent: @escaping (CGPoint, UIGestureRecognizer.State) -> Void) { self.onEvent = onEvent }
+        @objc func handle(_ g: UILongPressGestureRecognizer) { onEvent(g.location(in: g.view), g.state) }
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+/// Compact "table row" card for the scrubbed forecast point.
+struct ScrubReadoutCard: View {
+    let point: ForecastPoint
+    let timeText: String
+    let useFahrenheit: Bool
+    let onClose: () -> Void
+
+    var body: some View {
+        let unit = useFahrenheit ? "°F" : "°C"
+        let windUnit = useFahrenheit ? "mph" : "kph"
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Text(timeText).font(.caption2.weight(.semibold))
+                Spacer(minLength: 10)
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill").font(.callout).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            row("Temp/feels \(unit)",
+                String(format: "%.1f (%.1f)",
+                       useFahrenheit ? point.temperatureF : point.temperatureC,
+                       useFahrenheit ? point.apparentTemperatureF : point.apparentTemperatureC), .green)
+            row("Wet bulb \(unit)", String(format: "%.1f", useFahrenheit ? point.wetBulbF : point.wetBulbC), .blue)
+            row("Dew pt \(unit)", String(format: "%.1f", useFahrenheit ? point.dewPointF : point.dewPointC), .red)
+            row("Wind (gust) \(windUnit)",
+                String(format: "%.0f (%.0f)",
+                       useFahrenheit ? point.windSpeedMPH : point.windSpeedKPH,
+                       useFahrenheit ? point.windGustMPH : point.windGustKPH), .red)
+            row("Precip", String(format: "%.1f mm (%.0f%%)", point.precipitationMM, point.precipProbability * 100), .blue)
+        }
+        .padding(6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+        .fixedSize()
+    }
+
+    private func row(_ label: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value).font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(tint)
+        }
     }
 }

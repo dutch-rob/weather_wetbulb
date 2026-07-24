@@ -21,6 +21,7 @@ struct TenDayView: View {
     var onRefresh: (() async -> Void)? = nil
 
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit: Bool = true
+    @AppStorage(SettingsKey.use12HourClock) private var use12Hour = false
     @AppStorage(SettingsKey.chartStyle) private var chartStyle: ChartStyle = .filled
     @AppStorage(SettingsKey.graphPalette) private var palette: GraphPalette = .vivid
     @AppStorage(GraphKey.temp)     private var graphTemp     = true
@@ -30,6 +31,8 @@ struct TenDayView: View {
     @AppStorage(GraphKey.precip)   private var graphPrecip   = true
     @AppStorage(GraphKey.wind)     private var graphWind      = true
     @AppStorage(GraphKey.gust)     private var graphGust      = true
+
+    @State private var scrubDate: Date? = nil
 
     private var axisInk: Color { .primary }
 
@@ -89,6 +92,77 @@ struct TenDayView: View {
               Calendar.current.component(.hour, from: date) == 0 else { return "" }
         let key = TenDayView.dayFormatter.string(from: date)
         return TenDayView.dayAbbreviations[key] ?? String(key.prefix(2))
+    }
+
+    // MARK: - Scrubbing
+
+    private var scrubPoint: ForecastPoint? {
+        guard let t = scrubDate else { return nil }
+        return nearestForecastPoint(to: t, in: series)
+    }
+
+    private var scrubFraction: Double {
+        guard let t = scrubDate, let dom = dateDomain else { return 0.5 }
+        let total = dom.upperBound.timeIntervalSince(dom.lowerBound)
+        guard total > 0 else { return 0.5 }
+        return min(1, max(0, t.timeIntervalSince(dom.lowerBound) / total))
+    }
+
+    private func scrubTimeText(_ date: Date) -> String {
+        let wd = TenDayView.dayFormatter.string(from: date)
+        let h = Calendar.current.component(.hour, from: date)
+        let hm: String
+        if use12Hour {
+            if h == 0 { hm = "12 am" } else if h == 12 { hm = "noon" }
+            else { hm = h < 12 ? "\(h) am" : "\(h - 12) pm" }
+        } else {
+            hm = String(format: "%02d:00", h)
+        }
+        return "\(wd) \(hm)"
+    }
+
+    private func updateScrub(atX xLocation: CGFloat, proxy: ChartProxy, geo: GeometryProxy) {
+        guard let plotFrame = proxy.plotFrame else { return }
+        let x = xLocation - geo[plotFrame].origin.x
+        guard let date = proxy.value(atX: x, as: Date.self) else { return }
+        scrubDate = nearestForecastPoint(to: date, in: series)?.date
+    }
+
+    @ViewBuilder
+    private func scrubOverlay(_ proxy: ChartProxy) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                if let t = scrubDate, let plotFrame = proxy.plotFrame,
+                   let x = proxy.position(forX: t) {
+                    let plot = geo[plotFrame]
+                    Path { p in
+                        p.move(to: CGPoint(x: plot.minX + x, y: plot.minY))
+                        p.addLine(to: CGPoint(x: plot.minX + x, y: plot.maxY))
+                    }
+                    .stroke(axisInk.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+                LongPressLocator { loc, state in
+                    if state == .began || state == .changed {
+                        updateScrub(atX: loc.x, proxy: proxy, geo: geo)
+                    }
+                }
+                if scrubDate != nil {
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0)
+                            .onChanged { updateScrub(atX: $0.location.x, proxy: proxy, geo: geo) })
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var scrubReadoutHUD: some View {
+        if let p = scrubPoint {
+            ScrubReadoutCard(point: p, timeText: scrubTimeText(p.date),
+                             useFahrenheit: useFahrenheit) { scrubDate = nil }
+                .padding(.top, 6).padding(.horizontal, 6)
+                .transition(.opacity)
+        }
     }
 
     var body: some View {
@@ -227,6 +301,7 @@ struct TenDayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
             .overlay(alignment: .topLeading) {
                 Text(useFahrenheit ? "°F" : "°C")
                     .font(.caption2)
@@ -234,6 +309,7 @@ struct TenDayView: View {
                     .padding(.leading, 4)
                     .padding(.top, 14)
             }
+            .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
             .frame(height: height - 20)
         }
     }
@@ -294,6 +370,7 @@ struct TenDayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
 
             ChartLegendRow(entries: filledWindLegend, ink: axisInk)
@@ -354,6 +431,8 @@ struct TenDayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
+            .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
             .frame(height: height - 20)
         }
     }
@@ -404,6 +483,7 @@ struct TenDayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
         }
     }

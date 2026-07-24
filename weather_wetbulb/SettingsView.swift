@@ -22,6 +22,7 @@ struct SettingsView: View {
     @AppStorage(GraphKey.wind)     private var graphWind      = true
     @AppStorage(GraphKey.gust)     private var graphGust      = true
     @AppStorage(SettingsKey.showTable) private var showTable = true
+    @AppStorage(SettingsKey.useFoldTimeline) private var useFoldTimeline = false
     @AppStorage(SettingsKey.syncAcrossDevices) private var syncAcrossDevices = false
     @Environment(\.dismiss) private var dismiss
 
@@ -80,6 +81,25 @@ struct SettingsView: View {
                 Toggle("Table screen", isOn: $showTable)
             } footer: {
                 Text("When off, swiping only switches between the 24-hour and 10-day graph screens.")
+            }
+
+            Section {
+                Toggle("Fold timeline", isOn: $useFoldTimeline)
+                    .onChange(of: useFoldTimeline) { _, on in
+                        if on {
+                            // Fold mode is a single screen and owns the swipe, so
+                            // the table is hidden while it's on (remember the prior
+                            // choice to restore it later).
+                            UserDefaults.standard.set(showTable, forKey: SettingsKey.tableBeforeFold)
+                            showTable = false
+                        } else {
+                            showTable = UserDefaults.standard.bool(forKey: SettingsKey.tableBeforeFold)
+                        }
+                    }
+            } header: {
+                Text("Experimental")
+            } footer: {
+                Text("Replaces the paged 24-hour and 10-day screens with one timeline: swipe left/right to morph between them — the charts zoom from a single day out to the whole forecast. Long-press a chart to read exact values. (The table screen is hidden while this is on.)")
             }
 
             Section {

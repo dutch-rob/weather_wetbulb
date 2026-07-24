@@ -14,6 +14,8 @@ enum SettingsKey {
     static let chartStyle    = "chartStyle"
     static let graphPalette   = "graphPalette"   // GraphPalette raw value
     static let showTable      = "showTable"
+    static let useFoldTimeline = "useFoldTimeline"
+    static let tableBeforeFold = "tableBeforeFold"
     static let syncAcrossDevices = "syncAcrossDevices"
 
     // Indoor-comfort (HomeKit) feature

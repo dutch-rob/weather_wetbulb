@@ -19,6 +19,7 @@ struct ContentView: View {
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
     @AppStorage(SettingsKey.chartStyle) private var chartStyleRaw = ChartStyle.filled.rawValue
     @AppStorage(SettingsKey.showTable) private var showTable = true
+    @AppStorage(SettingsKey.useFoldTimeline) private var useFoldTimeline = false
     @AppStorage(SettingsKey.indoorTrackingEnabled) private var indoorTracking = false
     @Environment(\.scenePhase) private var scenePhase
     private let indoorTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
@@ -44,7 +45,9 @@ struct ContentView: View {
 
             Divider()
 
-            if showTable {
+            if useFoldTimeline {
+                foldTab
+            } else if showTable {
                 // 5-tab wrap-around: 0 = table phantom → 3, 1 = 24h (default),
                 // 2 = 10d, 3 = table, 4 = 24h phantom → 1. Phantoms show
                 // identical content; onChange teleports to the real tab with no
@@ -253,6 +256,21 @@ struct ContentView: View {
             ForecastTableView(
                 weatherService: weather,
                 nowTick: nowTick,
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
+            )
+        }
+    }
+
+    private var foldTab: some View {
+        VStack(spacing: 0) {
+            tabLabel("timeline · swipe to zoom")
+            FoldTimelineView(
+                series: weather.isRefreshing ? [] : weather.series10d,
+                current: weather.isRefreshing ? nil : weather.current,
+                progressLoad: weather.loadProgress,
+                nowTick: nowTick,
+                errorMessage: weather.lastErrorMessage,
+                attribution: weather.attribution,
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
             )
         }

@@ -186,13 +186,18 @@ struct ContentView: View {
         Divider()
     }
 
-    private func loadWeather(preserveData: Bool = false) async {
+    private func loadWeather(preserveData: Bool = false, useFreshLocation: Bool = false) async {
         if let place = selectedPlace {
             await weather.loadFor(location: place.clLocation, preserveData: preserveData)
-        } else if let loc = locationProvider.currentLocation {
-            await weather.loadFor(location: loc, preserveData: preserveData)
         } else {
-            locationProvider.requestLocation()
+            let loc = useFreshLocation
+                ? await locationProvider.requestFreshLocation()
+                : locationProvider.currentLocation
+            if let loc {
+                await weather.loadFor(location: loc, preserveData: preserveData)
+            } else {
+                locationProvider.requestLocation()
+            }
         }
     }
 
@@ -208,7 +213,7 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
             )
         }
     }
@@ -222,7 +227,7 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
             )
         }
     }
@@ -233,7 +238,7 @@ struct ContentView: View {
             ForecastTableView(
                 weatherService: weather,
                 nowTick: nowTick,
-                onRefresh: { await loadWeather(preserveData: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
             )
         }
     }

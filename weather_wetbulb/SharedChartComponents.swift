@@ -138,10 +138,15 @@ struct WeatherAttributionLink: View {
 
 // MARK: - Clock format
 
-/// Compact 24-hour hour-of-day label: "00"…"23".
-func clockHourLabel(_ hour: Int) -> String {
+/// Compact hour-of-day label. 24-hour → "00"…"23". 12-hour → 1…12 with the
+/// noon tick spelled out ("noon") and midnight shown as "12" (no am/pm suffix,
+/// matching MyFeelsLike).
+func clockHourLabel(_ hour: Int, use12: Bool = false) -> String {
     let h = ((hour % 24) + 24) % 24
-    return String(format: "%02d", h)
+    guard use12 else { return String(format: "%02d", h) }
+    if h == 12 { return "noon" }
+    let hr = h % 12
+    return hr == 0 ? "12" : "\(hr)"
 }
 
 // MARK: - View extension

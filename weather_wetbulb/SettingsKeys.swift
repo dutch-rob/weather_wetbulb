@@ -10,8 +10,11 @@ import Foundation
 
 enum SettingsKey {
     static let useFahrenheit = "useFahrenheit"
+    static let use12HourClock = "use12HourClock"
     static let chartStyle    = "chartStyle"
     static let graphPalette   = "graphPalette"   // GraphPalette raw value
+    static let showTable      = "showTable"
+    static let syncAcrossDevices = "syncAcrossDevices"
 
     // Indoor-comfort (HomeKit) feature
     static let indoorTrackingEnabled = "indoorTrackingEnabled"

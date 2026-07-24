@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var selectedTab = 1
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
     @AppStorage(SettingsKey.chartStyle) private var chartStyleRaw = ChartStyle.filled.rawValue
+    @AppStorage(SettingsKey.showTable) private var showTable = true
     @AppStorage(SettingsKey.indoorTrackingEnabled) private var indoorTracking = false
     @Environment(\.scenePhase) private var scenePhase
     private let indoorTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
@@ -43,27 +44,41 @@ struct ContentView: View {
 
             Divider()
 
-            // 5-tab layout for circular (wrap-around) swiping:
-            //   0 = table phantom  →  real tab is 3
-            //   1 = 24h (real, default)
-            //   2 = 10d (real)
-            //   3 = table (real)
-            //   4 = 24h phantom  →  real tab is 1
-            // Phantoms show identical content; onChange teleports to the real
-            // tab instantly (no animation) so the user never notices the jump.
-            TabView(selection: $selectedTab) {
-                forecastTableTab.tag(0)
-                hereTodayTab.tag(1)
-                tenDayTab.tag(2)
-                forecastTableTab.tag(3)
-                hereTodayTab.tag(4)
-            }
-            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-            .onChange(of: selectedTab) { _, tab in
-                guard tab == 0 || tab == 4 else { return }
-                var t = Transaction()
-                t.disablesAnimations = true
-                withTransaction(t) { selectedTab = tab == 0 ? 3 : 1 }
+            if showTable {
+                // 5-tab wrap-around: 0 = table phantom → 3, 1 = 24h (default),
+                // 2 = 10d, 3 = table, 4 = 24h phantom → 1. Phantoms show
+                // identical content; onChange teleports to the real tab with no
+                // animation so the jump is invisible.
+                TabView(selection: $selectedTab) {
+                    forecastTableTab.tag(0)
+                    hereTodayTab.tag(1)
+                    tenDayTab.tag(2)
+                    forecastTableTab.tag(3)
+                    hereTodayTab.tag(4)
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .onChange(of: selectedTab) { _, tab in
+                    guard tab == 0 || tab == 4 else { return }
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) { selectedTab = tab == 0 ? 3 : 1 }
+                }
+            } else {
+                // No table: 4-tab wrap-around between just 24h and 10d.
+                //   0 = 10d phantom → 2, 1 = 24h (default), 2 = 10d, 3 = 24h phantom → 1
+                TabView(selection: $selectedTab) {
+                    tenDayTab.tag(0)
+                    hereTodayTab.tag(1)
+                    tenDayTab.tag(2)
+                    hereTodayTab.tag(3)
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .onChange(of: selectedTab) { _, tab in
+                    guard tab == 0 || tab == 3 else { return }
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) { selectedTab = tab == 0 ? 2 : 1 }
+                }
             }
         }
         .safeAreaInset(edge: .bottom) {

@@ -15,9 +15,11 @@ enum GraphKey {
     static let temp     = "graphTemp"
     static let wetBulb  = "graphWetBulb"
     static let dewPoint = "graphDewPoint"
+    static let feels    = "graphFeels"
     static let precip   = "graphPrecip"
     static let wind     = "graphWind"
     static let gust     = "graphGust"
+    static let sky      = "graphSky"
 }
 
 /// Saturation of the weather series colors.
@@ -28,7 +30,8 @@ enum GraphPalette: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String { self == .vivid ? "Vivid" : "Muted" }
 
-    var green: Color { self == .muted ? Color(red: 0.44, green: 0.62, blue: 0.44) : .green }
-    var blue:  Color { self == .muted ? Color(red: 0.40, green: 0.56, blue: 0.72) : .blue }
-    var red:   Color { self == .muted ? Color(red: 0.78, green: 0.44, blue: 0.44) : .red }
+    var green:  Color { self == .muted ? Color(red: 0.44, green: 0.62, blue: 0.44) : .green }
+    var blue:   Color { self == .muted ? Color(red: 0.40, green: 0.56, blue: 0.72) : .blue }
+    var red:    Color { self == .muted ? Color(red: 0.78, green: 0.44, blue: 0.44) : .red }
+    var purple: Color { self == .muted ? Color(red: 0.60, green: 0.48, blue: 0.72) : .purple }
 }

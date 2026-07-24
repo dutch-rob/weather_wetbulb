@@ -24,20 +24,20 @@ struct HereTodayView: View {
     var onRefresh: (() async -> Void)? = nil
 
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit: Bool = true
+    @AppStorage(SettingsKey.use12HourClock) private var use12Hour = false
     @AppStorage(SettingsKey.chartStyle) private var chartStyle: ChartStyle = .filled
     @AppStorage(SettingsKey.graphPalette) private var palette: GraphPalette = .vivid
     @AppStorage(GraphKey.temp)     private var graphTemp     = true
     @AppStorage(GraphKey.wetBulb)  private var graphWetBulb  = true
     @AppStorage(GraphKey.dewPoint) private var graphDewPoint = true
+    @AppStorage(GraphKey.feels)    private var graphFeels     = true
     @AppStorage(GraphKey.precip)   private var graphPrecip   = true
     @AppStorage(GraphKey.wind)     private var graphWind      = true
     @AppStorage(GraphKey.gust)     private var graphGust      = true
 
-    // Axis text/grid color. WetBulbCast has no sky background, so this is just
-    // the adaptive system color.
     private var axisInk: Color { .primary }
 
-    private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint }
+    private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
     private var windPanelVisible: Bool { graphPrecip || graphWind || graphGust }
 
     /// Classic style: domain spans the data exactly.
@@ -68,6 +68,7 @@ struct HereTodayView: View {
             if graphTemp     { vals.append(useFahrenheit ? p.temperatureF : p.temperatureC) }
             if graphWetBulb  { vals.append(useFahrenheit ? p.wetBulbF : p.wetBulbC) }
             if graphDewPoint { vals.append(useFahrenheit ? p.dewPointF : p.dewPointC) }
+            if graphFeels    { vals.append(useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC) }
         }
         guard let lo = vals.min(), let hi = vals.max() else { return 0...1 }
         let pad = max(1, (hi - lo) * 0.08)
@@ -86,15 +87,8 @@ struct HereTodayView: View {
         return 0...(hi + max(1, hi * 0.08))
     }
 
-    private static let hourFormatter: DateFormatter = {
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.dateFormat = "HH"
-        return df
-    }()
-
     private func hourLabel(for date: Date) -> String {
-        HereTodayView.hourFormatter.string(from: date)
+        clockHourLabel(Calendar.current.component(.hour, from: date), use12: use12Hour)
     }
 
     var body: some View {
@@ -141,14 +135,16 @@ struct HereTodayView: View {
 
     private var filledTempLegend: [(color: Color, label: String, isArea: Bool)] {
         var e: [(Color, String, Bool)] = []
-        if graphTemp     { e.append((palette.green, "Temp",     true)) }
-        if graphWetBulb  { e.append((palette.blue,  "Wet Bulb", true)) }
-        if graphDewPoint { e.append((palette.red,   "Dew Pt",   true)) }
+        if graphFeels    { e.append((palette.purple, "Feels like", false)) }
+        if graphTemp     { e.append((palette.green,  "Temp",       true)) }
+        if graphWetBulb  { e.append((palette.blue,   "Wet Bulb",   true)) }
+        if graphDewPoint { e.append((palette.red,    "Dew Pt",     true)) }
         return e
     }
 
     private var classicTempLegend: [(color: Color, label: String, isArea: Bool)] {
         var e: [(Color, String, Bool)] = []
+        if graphFeels    { e.append((palette.purple, "Feels like", false)) }
         if graphTemp     { e.append((palette.blue,  useFahrenheit ? "Temp °F"     : "Temp °C",     false)) }
         if graphWetBulb  { e.append((palette.green, useFahrenheit ? "Wet Bulb °F" : "Wet Bulb °C", false)) }
         if graphDewPoint { e.append((palette.red,   useFahrenheit ? "Dew Pt °F"   : "Dew Pt °C",   false)) }
@@ -167,6 +163,7 @@ struct HereTodayView: View {
         var e: [(Color, String, Bool)] = []
         if graphPrecip { e.append((palette.blue, "Precip %", true)) }
         if graphWind   { e.append((palette.red, useFahrenheit ? "Wind mph" : "Wind kph", false)) }
+        if graphGust   { e.append((palette.red.opacity(0.5), useFahrenheit ? "Gust mph" : "Gust kph", false)) }
         return e
     }
 
@@ -206,6 +203,14 @@ struct HereTodayView: View {
                                  series: .value("S", "dew"))
                             .foregroundStyle(palette.red).interpolationMethod(.linear)
                     }
+                    // Apparent ("feels like") stays a line on top of the bands.
+                    if graphFeels {
+                        LineMark(x: .value("Time", p.date),
+                                 y: .value("Feels like", useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
+                                 series: .value("S", "app"))
+                            .foregroundStyle(palette.purple).interpolationMethod(.linear)
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    }
                 }
                 if let c = current {
                     if graphTemp {
@@ -222,6 +227,11 @@ struct HereTodayView: View {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Dew Point", useFahrenheit ? c.dewPointF : c.dewPointC))
                             .foregroundStyle(palette.red).symbolSize(110)
+                    }
+                    if graphFeels {
+                        PointMark(x: .value("Time", c.date),
+                                  y: .value("Feels like", useFahrenheit ? c.apparentTemperatureF : c.apparentTemperatureC))
+                            .foregroundStyle(palette.purple).symbolSize(110)
                     }
                 }
             }
@@ -366,6 +376,13 @@ struct HereTodayView: View {
                              series: .value("S", "C"))
                         .foregroundStyle(palette.red).interpolationMethod(.linear)
                 }
+                if graphFeels {
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Feels like", useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
+                             series: .value("S", "D"))
+                        .foregroundStyle(palette.purple).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))
@@ -401,9 +418,18 @@ struct HereTodayView: View {
                              y: .value("Precip %", p.precipProbability * 100))
                         .foregroundStyle(palette.blue.opacity(0.3).gradient).interpolationMethod(.linear)
                 }
+                if graphGust {
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
+                             series: .value("S", "gust"))
+                        .foregroundStyle(palette.red.opacity(0.6)).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        .symbol(Circle()).symbolSize(0)
+                }
                 if graphWind {
                     LineMark(x: .value("Time", p.date),
-                             y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH))
+                             y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
+                             series: .value("S", "wind"))
                         .foregroundStyle(palette.red).interpolationMethod(.linear)
                         .symbol(Circle()).symbolSize(0)
                 }

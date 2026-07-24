@@ -20,11 +20,21 @@ import SwiftData
 /// Exposed so background tasks can open a context outside the view hierarchy.
 enum IndoorStore {
     static let container: ModelContainer = {
-        do {
-            return try ModelContainer(for: ComfortSample.self, CoolerEvent.self, HVACEvent.self)
-        } catch {
-            fatalError("Failed to create ComfortSample ModelContainer: \(error)")
+        // Cross-device iCloud sync is opt-in (Settings → iCloud), off by default.
+        // When on, use CloudKit's automatic private-database sync; when off keep
+        // the store device-local. Built once at launch, so the toggle takes
+        // effect on the next launch.
+        let syncOn = UserDefaults.standard.bool(forKey: SettingsKey.syncAcrossDevices)
+        let config = ModelConfiguration(cloudKitDatabase: syncOn ? .automatic : .none)
+        if let container = try? ModelContainer(
+            for: ComfortSample.self, CoolerEvent.self, HVACEvent.self, configurations: config) {
+            return container
         }
+        // Fall back to a local store so the app still launches if CloudKit
+        // setup fails (misconfiguration, unavailable).
+        let local = ModelConfiguration(cloudKitDatabase: .none)
+        return try! ModelContainer(
+            for: ComfortSample.self, CoolerEvent.self, HVACEvent.self, configurations: local)
     }()
 }
 

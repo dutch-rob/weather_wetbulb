@@ -26,13 +26,14 @@ struct TenDayView: View {
     @AppStorage(GraphKey.temp)     private var graphTemp     = true
     @AppStorage(GraphKey.wetBulb)  private var graphWetBulb  = true
     @AppStorage(GraphKey.dewPoint) private var graphDewPoint = true
+    @AppStorage(GraphKey.feels)    private var graphFeels     = true
     @AppStorage(GraphKey.precip)   private var graphPrecip   = true
     @AppStorage(GraphKey.wind)     private var graphWind      = true
     @AppStorage(GraphKey.gust)     private var graphGust      = true
 
     private var axisInk: Color { .primary }
 
-    private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint }
+    private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
     private var windPanelVisible: Bool { graphPrecip || graphWind || graphGust }
 
     private var dateDomain: ClosedRange<Date>? {
@@ -46,6 +47,7 @@ struct TenDayView: View {
             if graphTemp     { vals.append(useFahrenheit ? p.temperatureF : p.temperatureC) }
             if graphWetBulb  { vals.append(useFahrenheit ? p.wetBulbF : p.wetBulbC) }
             if graphDewPoint { vals.append(useFahrenheit ? p.dewPointF : p.dewPointC) }
+            if graphFeels    { vals.append(useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC) }
         }
         guard let lo = vals.min(), let hi = vals.max() else { return 0...1 }
         let pad = max(1, (hi - lo) * 0.08)
@@ -133,14 +135,16 @@ struct TenDayView: View {
 
     private var filledTempLegend: [(color: Color, label: String, isArea: Bool)] {
         var e: [(Color, String, Bool)] = []
-        if graphTemp     { e.append((palette.green, "Temp",     true)) }
-        if graphWetBulb  { e.append((palette.blue,  "Wet Bulb", true)) }
-        if graphDewPoint { e.append((palette.red,   "Dew Pt",   true)) }
+        if graphFeels    { e.append((palette.purple, "Feels like", false)) }
+        if graphTemp     { e.append((palette.green,  "Temp",       true)) }
+        if graphWetBulb  { e.append((palette.blue,   "Wet Bulb",   true)) }
+        if graphDewPoint { e.append((palette.red,    "Dew Pt",     true)) }
         return e
     }
 
     private var classicTempLegend: [(color: Color, label: String, isArea: Bool)] {
         var e: [(Color, String, Bool)] = []
+        if graphFeels    { e.append((palette.purple, "Feels like", false)) }
         if graphTemp     { e.append((palette.blue,  useFahrenheit ? "Temp °F"     : "Temp °C",     false)) }
         if graphWetBulb  { e.append((palette.green, useFahrenheit ? "Wet Bulb °F" : "Wet Bulb °C", false)) }
         if graphDewPoint { e.append((palette.red,   useFahrenheit ? "Dew Pt °F"   : "Dew Pt °C",   false)) }
@@ -159,6 +163,7 @@ struct TenDayView: View {
         var e: [(Color, String, Bool)] = []
         if graphPrecip { e.append((palette.blue, "Precip %", true)) }
         if graphWind   { e.append((palette.red, useFahrenheit ? "Wind mph" : "Wind kph", false)) }
+        if graphGust   { e.append((palette.red.opacity(0.5), useFahrenheit ? "Gust mph" : "Gust kph", false)) }
         return e
     }
 
@@ -193,6 +198,13 @@ struct TenDayView: View {
                              yEnd: .value("Dew Point", useFahrenheit ? p.dewPointF : p.dewPointC),
                              series: .value("S", "dew"))
                         .foregroundStyle(palette.red).interpolationMethod(.linear)
+                }
+                if graphFeels {
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Feels like", useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
+                             series: .value("S", "app"))
+                        .foregroundStyle(palette.purple).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
                 }
             }
             .chartLegend(.hidden)
@@ -316,6 +328,13 @@ struct TenDayView: View {
                              series: .value("S", "C"))
                         .foregroundStyle(palette.red).interpolationMethod(.linear)
                 }
+                if graphFeels {
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Feels like", useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC),
+                             series: .value("S", "D"))
+                        .foregroundStyle(palette.purple).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
             }
             .chartLegend(.hidden)
             .chartYScale(domain: .automatic(includesZero: false))
@@ -351,9 +370,18 @@ struct TenDayView: View {
                              y: .value("Precip %", p.precipProbability * 100))
                         .foregroundStyle(palette.blue.opacity(0.3).gradient).interpolationMethod(.linear)
                 }
+                if graphGust {
+                    LineMark(x: .value("Time", p.date),
+                             y: .value("Gust", useFahrenheit ? p.windGustMPH : p.windGustKPH),
+                             series: .value("S", "gust"))
+                        .foregroundStyle(palette.red.opacity(0.6)).interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        .symbol(Circle()).symbolSize(0)
+                }
                 if graphWind {
                     LineMark(x: .value("Time", p.date),
-                             y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH))
+                             y: .value("Wind", useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH),
+                             series: .value("S", "wind"))
                         .foregroundStyle(palette.red).interpolationMethod(.linear)
                         .symbol(Circle()).symbolSize(0)
                 }

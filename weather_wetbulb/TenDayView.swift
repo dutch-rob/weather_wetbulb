@@ -141,15 +141,13 @@ struct TenDayView: View {
                     }
                     .stroke(axisInk.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 }
+                // The long-press is continuous: after it begins it keeps
+                // reporting .changed as the finger moves, so this one gesture
+                // both drops and drags the scrub line.
                 LongPressLocator { loc, state in
                     if state == .began || state == .changed {
                         updateScrub(atX: loc.x, proxy: proxy, geo: geo)
                     }
-                }
-                if scrubDate != nil {
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .gesture(DragGesture(minimumDistance: 0)
-                            .onChanged { updateScrub(atX: $0.location.x, proxy: proxy, geo: geo) })
                 }
             }
         }

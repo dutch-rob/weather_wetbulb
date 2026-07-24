@@ -166,32 +166,54 @@ func nearestForecastPoint(to date: Date, in series: [ForecastPoint]) -> Forecast
     series.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
 }
 
-/// A UIKit long-press recognizer that reports its location + state and
-/// coexists with SwiftUI's pager swipe / scroll (recognizes simultaneously),
-/// so a long press can drop a scrub line without breaking normal gestures.
+/// A UIKit long-press recognizer that reports its location + state. It is a
+/// continuous gesture, so after the press begins it keeps reporting `.changed`
+/// as the finger moves — that single gesture drives both dropping and dragging
+/// the scrub line.
+///
+/// Crucially it makes the enclosing scroll views (the tab pager and the
+/// vertical ScrollView) *require this long-press to fail* before they act, so a
+/// hold-then-drag scrubs instead of paging/scrolling, while a plain quick
+/// swipe (which fails the long-press immediately) still pages/scrolls normally.
 struct LongPressLocator: UIViewRepresentable {
     var minimumDuration: Double = 0.3
     var onEvent: (CGPoint, UIGestureRecognizer.State) -> Void
 
-    func makeUIView(context: Context) -> UIView {
-        let v = UIView()
+    func makeUIView(context: Context) -> LocatorView {
+        let v = LocatorView()
         v.backgroundColor = .clear
         let lp = UILongPressGestureRecognizer(target: context.coordinator,
                                               action: #selector(Coordinator.handle(_:)))
         lp.minimumPressDuration = minimumDuration
         lp.delegate = context.coordinator
         v.addGestureRecognizer(lp)
+        v.longPress = lp
         return v
     }
-    func updateUIView(_ v: UIView, context: Context) { context.coordinator.onEvent = onEvent }
+    func updateUIView(_ v: LocatorView, context: Context) { context.coordinator.onEvent = onEvent }
     func makeCoordinator() -> Coordinator { Coordinator(onEvent) }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var onEvent: (CGPoint, UIGestureRecognizer.State) -> Void
         init(_ onEvent: @escaping (CGPoint, UIGestureRecognizer.State) -> Void) { self.onEvent = onEvent }
         @objc func handle(_ g: UILongPressGestureRecognizer) { onEvent(g.location(in: g.view), g.state) }
-        func gestureRecognizer(_ g: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+
+    /// Hosts the recognizer and, once in the window, makes every ancestor
+    /// scroll view's pan wait for the long-press to fail.
+    final class LocatorView: UIView {
+        weak var longPress: UILongPressGestureRecognizer?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil, let lp = longPress else { return }
+            var v: UIView? = superview
+            while let cur = v {
+                if let scroll = cur as? UIScrollView {
+                    scroll.panGestureRecognizer.require(toFail: lp)
+                }
+                v = cur.superview
+            }
+        }
     }
 }
 

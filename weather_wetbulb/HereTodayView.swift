@@ -330,13 +330,15 @@ struct HereTodayView: View {
             }
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
             .chartOverlay { proxy in scrubOverlay(proxy) }
-            // In-plot unit annotation so the chart area doesn't shrink.
-            .overlay(alignment: .topLeading) {
+            // In-plot unit annotation so the chart area doesn't shrink. Kept on
+            // the trailing side: on the leading side it collides with a
+            // three-digit top y-axis label (e.g. 100 °F).
+            .overlay(alignment: .topTrailing) {
                 Text(useFahrenheit ? "°F" : "°C")
                     .font(.caption2)
                     .foregroundStyle(axisInk)
-                    .padding(.leading, 4)
-                    .padding(.top, 14)
+                    .padding(.trailing, 6)
+                    .padding(.top, 2)
             }
             .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
             .frame(height: height - 20)

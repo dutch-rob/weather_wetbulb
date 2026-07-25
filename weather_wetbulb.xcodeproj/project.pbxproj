@@ -639,6 +639,7 @@
 				INFOPLIST_FILE = "weather-wetbulb-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCast;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
+				INFOPLIST_KEY_NSHomeKitUsageDescription = "WetBulbCast reads your indoor temperature and humidity sensors to learn how outdoor weather affects your home and to estimate evaporative-cooler comfort.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -677,6 +678,7 @@
 				INFOPLIST_FILE = "weather-wetbulb-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCast;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
+				INFOPLIST_KEY_NSHomeKitUsageDescription = "WetBulbCast reads your indoor temperature and humidity sensors to learn how outdoor weather affects your home and to estimate evaporative-cooler comfort.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

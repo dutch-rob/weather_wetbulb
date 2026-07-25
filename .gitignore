@@ -10,3 +10,6 @@ DerivedData/
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Xcode per-user state (schemes, breakpoints) — churns constantly
+xcuserdata/

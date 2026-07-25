@@ -16,20 +16,10 @@ enum SettingsKey {
     static let showTable      = "showTable"
     static let useFoldTimeline = "useFoldTimeline"
     static let tableBeforeFold = "tableBeforeFold"
-    static let syncAcrossDevices = "syncAcrossDevices"
 
-    // Indoor-comfort (HomeKit) feature
-    static let indoorTrackingEnabled = "indoorTrackingEnabled"
-    static let indoorSensorIDs        = "indoorSensorIDs_v1"   // JSON [String] of selected characteristic UUIDs
-    static let homeLat                = "homeLat_v1"
-    static let homeLon                = "homeLon_v1"
-    static let homeAlt                = "homeAlt_v1"
-}
-
-/// Background-task identifier for periodic indoor sampling. Must match the
-/// value in BGTaskSchedulerPermittedIdentifiers (Info.plist).
-enum BGTask {
-    static let indoorSample = "robotex.weather-wetbulb.indoorSample"
+    // NOTE: the indoor-comfort (HomeKit) feature is not active in this release,
+    // so its keys (indoor tracking, selected sensors, home location) and the
+    // iCloud sync key are intentionally absent here. See the main branch.
 }
 
 /// How the forecast graphs are drawn.

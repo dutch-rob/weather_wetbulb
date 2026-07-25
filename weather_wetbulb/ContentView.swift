@@ -20,9 +20,7 @@ struct ContentView: View {
     @AppStorage(SettingsKey.chartStyle) private var chartStyleRaw = ChartStyle.filled.rawValue
     @AppStorage(SettingsKey.showTable) private var showTable = true
     @AppStorage(SettingsKey.useFoldTimeline) private var useFoldTimeline = false
-    @AppStorage(SettingsKey.indoorTrackingEnabled) private var indoorTracking = false
     @Environment(\.scenePhase) private var scenePhase
-    private let indoorTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     private var displayTitle: String {
         if let name = selectedPlace?.name { return name }
@@ -144,16 +142,10 @@ struct ContentView: View {
             if selectedPlace == nil && weather.series24h.isEmpty {
                 Task { await weather.loadFor(location: loc) }
             }
-            // Remember where "home" is for indoor sampling (only while at the
-            // current location and tracking is on).
-            if indoorTracking && selectedPlace == nil {
-                IndoorSamplingCoordinator.shared.updateHomeLocation(loc)
-            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             pushToWatch()
-            Task { await IndoorSamplingCoordinator.shared.sampleIfDue() }
             // Auto-refresh when returning from background if data is ≥ 30 min old.
             if let fetched = weather.lastFetchedAt,
                Date().timeIntervalSince(fetched) > 1800,
@@ -168,18 +160,10 @@ struct ContentView: View {
         .task {
             PhoneWatchSync.shared.start()
             pushToWatch()
-            if indoorTracking {
-                HomeKitService.shared.start()                       // begin discovery early
-                IndoorSamplingCoordinator.shared.scheduleBackgroundSample()
-                await IndoorSamplingCoordinator.shared.sampleIfDue()
-            }
             await loadWeather()
             places.refreshWeatherIfNeeded()
         }
         .onReceive(progressTimer) { nowTick = $0 }
-        .onReceive(indoorTimer) { _ in
-            Task { await IndoorSamplingCoordinator.shared.sampleIfDue() }
-        }
     }
 
     /// Push the current display settings + saved places to the watch.

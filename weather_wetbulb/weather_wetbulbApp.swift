@@ -6,11 +6,9 @@
 //
 
 import SwiftUI
-import SwiftData
 
 @main
 struct weather_wetbulbApp: App {
-    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Seed the default chart style FIRST — it reads whether `useFahrenheit`
@@ -39,17 +37,8 @@ struct weather_wetbulbApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(IndoorStore.container)
-        // Best-effort periodic indoor sampling in the background. iOS grants
-        // these opportunistically (and HomeKit reads are only reliable in the
-        // foreground), so the dataset is foreground-biased — see the sampler.
-        .backgroundTask(.appRefresh(BGTask.indoorSample)) {
-            await IndoorSamplingCoordinator.shared.runBackgroundSample()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background {
-                IndoorSamplingCoordinator.shared.scheduleBackgroundSample()
-            }
-        }
+        // NOTE: the indoor-comfort / evaporative-cooler feature (HomeKit sensor
+        // reading + SwiftData sampling) is not part of this release. Its code
+        // lives on the main branch; nothing here reads indoor sensors.
     }
 }

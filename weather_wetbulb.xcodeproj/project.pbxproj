@@ -639,7 +639,6 @@
 				INFOPLIST_FILE = "weather-wetbulb-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCast;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
-				INFOPLIST_KEY_NSHomeKitUsageDescription = "WetBulbCast reads your indoor temperature and humidity sensors to learn how outdoor weather affects your home and to estimate evaporative-cooler comfort.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -651,7 +650,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -678,7 +677,6 @@
 				INFOPLIST_FILE = "weather-wetbulb-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = WetBulbCast;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.weather";
-				INFOPLIST_KEY_NSHomeKitUsageDescription = "WetBulbCast reads your indoor temperature and humidity sensors to learn how outdoor weather affects your home and to estimate evaporative-cooler comfort.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Need location to fetch the weather data for current location.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -690,7 +688,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -806,7 +804,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -841,7 +839,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -876,7 +874,7 @@
 					"@executable_path/../../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp.ComplicationExtension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -910,7 +908,7 @@
 					"@executable_path/../../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "robotex.weather-wetbulb.watchkitapp.ComplicationExtension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;

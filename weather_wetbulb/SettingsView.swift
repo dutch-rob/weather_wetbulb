@@ -23,10 +23,7 @@ struct SettingsView: View {
     @AppStorage(GraphKey.gust)     private var graphGust      = true
     @AppStorage(SettingsKey.showTable) private var showTable = true
     @AppStorage(SettingsKey.useFoldTimeline) private var useFoldTimeline = false
-    @AppStorage(SettingsKey.syncAcrossDevices) private var syncAcrossDevices = false
     @Environment(\.dismiss) private var dismiss
-
-    @State private var showSyncRestartNote = false
 
     var body: some View {
         Form {
@@ -102,16 +99,8 @@ struct SettingsView: View {
                 Text("Replaces the paged 24-hour and 10-day screens with one timeline: swipe left/right to morph between them — the charts zoom from a single day out to the whole forecast. Long-press a chart to read exact values. (The table screen is hidden while this is on.)")
             }
 
-            Section {
-                Toggle("Sync across my devices", isOn: $syncAcrossDevices)
-                    .onChange(of: syncAcrossDevices) { _, _ in showSyncRestartNote = true }
-            } header: {
-                Text("iCloud")
-            } footer: {
-                Text("When on, your indoor-comfort data syncs across your own devices signed into the same iCloud account. Off by default. Changing it takes effect after you quit and reopen the app.")
-            }
-
-            IndoorSettingsSection()
+            // NOTE: the indoor-comfort (HomeKit) section and the iCloud sync
+            // toggle that carried its data are not part of this release.
 
             Section {
                 NavigationLink {
@@ -123,11 +112,6 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Reopen to apply", isPresented: $showSyncRestartNote) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Quit WetBulbCast (swipe it away in the App Switcher) and reopen it for the device-sync change to take effect.")
-        }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }

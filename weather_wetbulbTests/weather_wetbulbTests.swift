@@ -71,6 +71,38 @@ struct weather_wetbulbTests {
         #expect(d.string(forKey: SettingsKey.chartStyle) == ChartStyle.classic.rawValue)
     }
 
+    // MARK: - What's-new / upgrade detection
+
+    @Test func brandNewInstallIsNotFlaggedAsUpgrade() {
+        let name = "test.new.\(UUID().uuidString)"
+        let d = scratchDefaults(name)
+        defer { d.removePersistentDomain(forName: name) }
+
+        SettingsSeeding.seedUpgradeFlagIfNeeded(d)
+        #expect(d.bool(forKey: SettingsKey.isUpgradeUser) == false)
+    }
+
+    @Test func existingInstallIsFlaggedAsUpgrade() {
+        let name = "test.upgrade.\(UUID().uuidString)"
+        let d = scratchDefaults(name)
+        defer { d.removePersistentDomain(forName: name) }
+
+        d.set(true, forKey: SettingsKey.useFahrenheit)   // marker from an earlier version
+        SettingsSeeding.seedUpgradeFlagIfNeeded(d)
+        #expect(d.bool(forKey: SettingsKey.isUpgradeUser) == true)
+    }
+
+    @Test func upgradeFlagIsDecidedOnlyOnce() {
+        let name = "test.once.\(UUID().uuidString)"
+        let d = scratchDefaults(name)
+        defer { d.removePersistentDomain(forName: name) }
+
+        SettingsSeeding.seedUpgradeFlagIfNeeded(d)          // brand new → false
+        d.set(true, forKey: SettingsKey.useFahrenheit)      // later writes must not flip it
+        SettingsSeeding.seedUpgradeFlagIfNeeded(d)
+        #expect(d.bool(forKey: SettingsKey.isUpgradeUser) == false)
+    }
+
     @Test func seedingNeverOverwritesAnExistingChoice() {
         let name = "test.nooverwrite.\(UUID().uuidString)"
         let d = scratchDefaults(name)

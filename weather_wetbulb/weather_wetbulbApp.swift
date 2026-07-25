@@ -13,10 +13,11 @@ struct weather_wetbulbApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        // Seed the default chart style FIRST — it reads whether `useFahrenheit`
-        // has ever been written as one of its "existing user" markers, so it
-        // must run before the seeding below writes that key.
+        // These two read whether `useFahrenheit` has ever been written as one of
+        // their "existing user" markers, so they must run BEFORE the seeding
+        // below writes that key.
         SettingsSeeding.seedChartStyleIfNeeded()
+        SettingsSeeding.seedUpgradeFlagIfNeeded()
 
         // On first launch only: choose °F or °C based on the device region.
         // The following countries / territories conventionally use Fahrenheit:

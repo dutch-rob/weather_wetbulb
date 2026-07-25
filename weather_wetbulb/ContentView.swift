@@ -13,6 +13,9 @@ struct ContentView: View {
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var showPlaces = false
     @State private var showSettings = false
+    @State private var showWhatsNew = false
+    @AppStorage(SettingsKey.lastSeenVersion) private var lastSeenVersion = ""
+    @AppStorage(SettingsKey.isUpgradeUser) private var isUpgradeUser = false
     // Tab indices: 0 = table phantom, 1 = 24h (real), 2 = 10d (real),
     //              3 = table (real), 4 = 24h phantom  — for circular wrap.
     @State private var selectedTab = 1
@@ -135,6 +138,14 @@ struct ContentView: View {
             }
             .presentationDetents([.large])
         }
+        // Shown once per version, on the first open after installing/updating.
+        .sheet(isPresented: $showWhatsNew) {
+            WhatsNewView(isUpgrade: isUpgradeUser) {
+                lastSeenVersion = appVersionString
+                showWhatsNew = false
+            }
+            .interactiveDismissDisabled()
+        }
         .onReceive(locationProvider.$currentLocation.compactMap { $0 }) { loc in
             // Only fire on a location update when there is no data yet.
             // Prevents this from racing with pull-to-refresh or the
@@ -158,6 +169,7 @@ struct ContentView: View {
         .onChange(of: chartStyleRaw) { _, _ in pushToWatch() }
         .onChange(of: places.places) { _, _ in pushToWatch() }
         .task {
+            if lastSeenVersion != appVersionString { showWhatsNew = true }
             PhoneWatchSync.shared.start()
             pushToWatch()
             await loadWeather()

@@ -102,7 +102,6 @@ struct ForecastTableView: View {
                     }
                     .frame(minWidth: totalWidth)
                 }
-                .refreshable { await onRefresh?() }
             }
         }
     }

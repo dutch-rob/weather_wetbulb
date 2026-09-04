@@ -13,7 +13,30 @@ import SwiftUI
 import Charts
 
 struct HereTodayView: View {
-    var series: [ForecastPoint]
+    var allSeries: [ForecastPoint]
+
+    /// Left edge of the visible time window. nil = show the whole `allSeries`
+    /// (the pre-scrolling behaviour). When set, the charts pan over the full
+    /// -10d ... +10d series instead of showing a fixed forecast slice.
+    var windowStart: Date? = nil
+    /// How much time the window covers.
+    var windowSpan: TimeInterval = 24 * 3600
+
+    /// The window as a range, if scrolling is active.
+    private var visibleRange: ClosedRange<Date>? {
+        guard let s = windowStart else { return nil }
+        return s...s.addingTimeInterval(windowSpan)
+    }
+
+    /// Points inside the window (padded slightly so curves reach both edges).
+    /// Everything below draws from this, so the y-axis and the scrubber follow
+    /// whatever is on screen.
+    private var series: [ForecastPoint] {
+        guard let r = visibleRange else { return allSeries }
+        let lo = r.lowerBound.addingTimeInterval(-2 * 3600)
+        let hi = r.upperBound.addingTimeInterval(2 * 3600)
+        return allSeries.filter { $0.date >= lo && $0.date <= hi }
+    }
     /// Apple's current-conditions nowcast, drawn as prominent "now" dots in a
     /// small gap to the left of the forecast curves (filled style only).
     var current: ForecastPoint? = nil
@@ -45,6 +68,7 @@ struct HereTodayView: View {
 
     /// Classic style: domain spans the data exactly.
     private var dateDomain: ClosedRange<Date>? {
+        if let r = visibleRange { return r }
         guard let first = series.first?.date, let last = series.last?.date else { return nil }
         return first...last
     }
@@ -52,6 +76,7 @@ struct HereTodayView: View {
     /// Filled style: domain begins ~1 h before "now" so the forecast curves sit
     /// slightly to the right, leaving a gap on the left for the current dots.
     private var filledDateDomain: ClosedRange<Date>? {
+        if let r = visibleRange { return r }
         guard let last = series.last?.date else { return nil }
         let lo: Date
         if let c = current?.date {
@@ -168,7 +193,10 @@ struct HereTodayView: View {
     var body: some View {
         GeometryReader { geo in
             let h = geo.size.height
-            ScrollView {
+            // Deliberately not a ScrollView: the content is sized to the screen,
+            // and a scroll view would swallow the vertical drag that now
+            // switches screens.
+            Group {
                 if series.isEmpty {
                     ForecastLoadingView(progress: progress, nowTick: nowTick, errorMessage: errorMessage)
                         .padding()
@@ -185,7 +213,6 @@ struct HereTodayView: View {
                     .frame(minHeight: h)
                 }
             }
-            .refreshable { await onRefresh?() }
         }
     }
 
@@ -329,6 +356,7 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartPlotStyle { $0.clipped() }
             .chartOverlay { proxy in scrubOverlay(proxy) }
             // In-plot unit annotation so the chart area doesn't shrink. Kept on
             // the trailing side: on the leading side it collides with a
@@ -420,6 +448,7 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartPlotStyle { $0.clipped() }
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
 
@@ -481,6 +510,7 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartPlotStyle { $0.clipped() }
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
             .frame(height: height - 20)
@@ -533,6 +563,7 @@ struct HereTodayView: View {
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
+            .chartPlotStyle { $0.clipped() }
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
         }

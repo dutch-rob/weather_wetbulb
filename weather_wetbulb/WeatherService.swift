@@ -106,6 +106,12 @@ private let sharedWeatherService = WeatherKit.WeatherService()
 final class WeatherService: ObservableObject {
     @Published var series24h: [ForecastPoint] = []
     @Published var series10d: [ForecastPoint] = []
+    /// One continuous series spanning roughly now-10d ... now+10d, used by the
+    /// scrollable graph screens. History is appended as it arrives, so this may
+    /// briefly hold forecast-only data right after a load.
+    @Published var seriesFull: [ForecastPoint] = []
+    /// True once the past-10-days history has been merged into `seriesFull`.
+    @Published var hasHistory: Bool = false
     @Published var current: ForecastPoint? = nil
     @Published var placeDescription: String = ""
     @Published var loadProgress: LoadProgress = LoadProgress()
@@ -135,6 +141,8 @@ final class WeatherService: ObservableObject {
             placeDescription = ""
             series24h        = []
             series10d        = []
+            seriesFull       = []
+            hasHistory       = false
             current          = nil
         }
         finish(.location)
@@ -153,8 +161,17 @@ final class WeatherService: ObservableObject {
             series10d = WeatherMapping.mapPoints(from: hours, start: now,
                                    end: now.addingTimeInterval(240 * 3600), location: location)
             current   = WeatherMapping.mapCurrent(weather.currentWeather, location: location)
+            // Forecast half of the scrollable series; history is merged in below.
+            seriesFull = series10d
             isRefreshing  = false          // new data is in; hide spinner
             lastFetchedAt = Date()
+
+            // Past 10 days, fetched separately (WeatherKit serves history from a
+            // different endpoint) and merged in when it arrives, so the forecast
+            // is on screen immediately either way.
+            Task { [weak self] in
+                await self?.loadHistory(location: location, now: now, generation: gen)
+            }
 
             guard loadGeneration == gen else { return }
             start(.geocode)
@@ -197,6 +214,36 @@ final class WeatherService: ObservableObject {
             }
             lastErrorMessage = error.localizedDescription
             print("Weather load failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - History
+
+    /// Fetch the past `days` of hourly observations and merge them into
+    /// `seriesFull` ahead of the forecast. Failure is silent: history is an
+    /// enhancement, and the forecast is already on screen.
+    @MainActor
+    private func loadHistory(location: CLLocation, now: Date, generation gen: Int,
+                             days: Int = 10) async {
+        let start = Calendar.current.date(byAdding: .day, value: -days, to: now) ?? now
+        do {
+            let past = try await withTimeout(20) {
+                try await sharedWeatherService.weather(
+                    for: location,
+                    including: .hourly(startDate: start, endDate: now))
+            }
+            guard loadGeneration == gen else { return }
+            let points = WeatherMapping.mapPoints(from: Array(past),
+                                                  start: start, end: now, location: location)
+            guard !points.isEmpty else { return }
+            // Merge, de-duplicating on the hour so an overlapping boundary hour
+            // doesn't appear twice.
+            var byHour: [Date: ForecastPoint] = [:]
+            for p in points + seriesFull { byHour[p.date] = p }
+            seriesFull = byHour.values.sorted { $0.date < $1.date }
+            hasHistory = true
+        } catch {
+            print("History load failed: \(error.localizedDescription)")
         }
     }
 }

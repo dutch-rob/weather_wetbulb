@@ -13,12 +13,13 @@ struct InfoView: View {
 
                 Group {
                     Text("Start screen: 24 hour forecast").font(.headline)
-                    Text("WetBulbCast starts on the screen showing 24 hour weather forecast graphs for your current location. The top graph shows temperature, wet-bulb temperature and dew point, plus the \"feels like\" temperature reported by Apple Weather. The bottom graph shows wind speed, gusts and chance of precipitation. Above the graphs, the current place is listed — tap it to switch places. Below the graphs are buttons to")
+                    Text("WetBulbCast starts on the screen showing 24 hour weather forecast graphs for your current location. The app reads the past 10 days of weather as well as the forecast, so you can scroll back to see what the weather actually did. The top graph shows temperature, wet-bulb temperature and dew point, plus the \"feels like\" temperature reported by Apple Weather. The bottom graph shows wind speed, gusts and chance of precipitation. Above the graphs, the current place is listed — tap it to switch places. Below the graphs are buttons to")
                     VStack(alignment: .leading, spacing: 8) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("    • Switch between Celsius and Fahrenheit")
                             Text("    • Switch to another place")
                             Text("    • Open Settings (the cog wheel), which also holds the About screen with this info")
+                            Text("    • Refresh the forecast (the circular arrow, top right)")
                         }
                     }
                 }
@@ -30,8 +31,9 @@ struct InfoView: View {
 
                 Group {
                     Text("Swiping").font(.headline)
-                    Text("Swiping left/right gets you to graphs with 10 day forecast or a table with a larger selection of forecast data.")
-                    Text("Swiping down tries to refresh your location and forecast data.")
+                    Text("On a graph screen, swiping left or right scrolls the graph through time. The graph starts at the current time; swipe right to go back, up to 10 days into the past, and left to go forward, up to 10 days ahead. Both graph screens share the same position, so the place you scrolled to is still there when you switch screens.")
+                    Text("Swiping up or down switches screens: between the 24 hour graph, the 10 day graph and the table. On the table, scrolling past the top or the bottom switches screens in the same way.")
+                    Text("To reload your location and forecast, use the refresh button next to the place name at the top.")
                 }
 
                 Group {
@@ -63,7 +65,7 @@ struct InfoView: View {
 
                 Group {
                     Text("Fold timeline (experimental)").font(.headline)
-                    Text("Instead of paging between a 24-hour screen and a 10-day screen, the fold timeline puts both on one screen: swipe left or right and the graphs zoom smoothly between a single day and the whole forecast. The scrubber works here too. The table screen is hidden while the fold timeline is on.")
+                    Text("Instead of paging between a 24-hour screen and a 10-day screen, the fold timeline puts both on one screen. Swipe left or right to scroll through time, and swipe up or down to zoom: from a single day out to the whole twenty days of history and forecast, and you can stop at any zoom level in between. The heading tells you how wide the window is and where it starts. The scrubber works here too. The table screen is hidden while the fold timeline is on.")
                 }
 
                 Group {

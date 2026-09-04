@@ -4,6 +4,16 @@ struct ForecastTableView: View {
     @ObservedObject var weatherService: WeatherService
     var nowTick: Date
     var onRefresh: (() async -> Void)? = nil
+    /// Called when the user swipes past an end of the table: -1 = previous
+    /// screen, +1 = next. The table owns its own scrolling, so it switches
+    /// screens on over-scroll rather than on any vertical drag.
+    var onSwitchScreen: ((Int) -> Void)? = nil
+
+    @State private var atTop = true
+    @State private var atBottom = false
+    @State private var didScrollToNow = false
+
+    private struct ScrollEdges: Equatable { var top: Bool; var bottom: Bool }
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private static let timeFormatter: DateFormatter = {
@@ -26,12 +36,22 @@ struct ForecastTableView: View {
         let points: [ForecastPoint]
     }
 
+    /// The full -10d…+10d series when history has arrived, else the forecast.
+    private var tableSeries: [ForecastPoint] {
+        weatherService.seriesFull.isEmpty ? weatherService.series10d : weatherService.seriesFull
+    }
+
+    /// First row at or after "now" — the table opens here rather than 10 days ago.
+    private var nowRowID: ForecastPoint.ID? {
+        (tableSeries.first { $0.date >= nowTick } ?? tableSeries.last)?.id
+    }
+
     private var daySections: [DaySection] {
         var sections: [DaySection] = []
         var currentKey  = ""
         var currentPts: [ForecastPoint] = []
 
-        for pt in weatherService.series10d {
+        for pt in tableSeries {
             let key = Self.dayHeaderFormatter.string(from: pt.date)
             if key != currentKey {
                 if !currentPts.isEmpty {
@@ -66,7 +86,7 @@ struct ForecastTableView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if weatherService.series10d.isEmpty || weatherService.isRefreshing {
+            if tableSeries.isEmpty || weatherService.isRefreshing {
                 ForecastLoadingView(
                     progress: weatherService.loadProgress,
                     nowTick: nowTick,
@@ -74,6 +94,7 @@ struct ForecastTableView: View {
                 )
                 .padding()
             } else {
+                ScrollViewReader { proxy in
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                         ForEach(daySections) { section in
@@ -101,6 +122,30 @@ struct ForecastTableView: View {
                         }
                     }
                     .frame(minWidth: totalWidth)
+                }
+                .onScrollGeometryChange(for: ScrollEdges.self) { g in
+                    ScrollEdges(
+                        top: g.contentOffset.y <= g.contentInsets.top + 1,
+                        bottom: g.contentOffset.y + g.containerSize.height
+                                >= g.contentSize.height - 1)
+                } action: { _, v in
+                    atTop = v.top; atBottom = v.bottom
+                }
+                // Only an over-scroll past an end switches screens, so normal
+                // scrolling through the rows is untouched.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 20)
+                        .onEnded { v in
+                            guard abs(v.translation.height) > abs(v.translation.width) else { return }
+                            if v.translation.height < -70 && atBottom { onSwitchScreen?(1) }
+                            else if v.translation.height > 70 && atTop { onSwitchScreen?(-1) }
+                        }
+                )
+                .onAppear {
+                    guard !didScrollToNow, let id = nowRowID else { return }
+                    didScrollToNow = true
+                    proxy.scrollTo(id, anchor: .topLeading)
+                }
                 }
             }
         }

@@ -34,10 +34,19 @@ struct FoldTimelineView: View {
     @AppStorage(GraphKey.wind)     private var graphWind      = true
     @AppStorage(GraphKey.gust)     private var graphGust      = true
 
-    /// 0 = 24-hour view, 1 = 10-day view.
-    @State private var progress: Double = 0
-    @State private var dragBase: Double? = nil
+    /// Zoom level: 0 = a 24-hour window, 1 = the whole -10d…+10d series.
+    /// Not snapped, so any intermediate zoom is a valid resting place.
+    @State private var zoom: Double = 0
+    /// Left edge of the visible window, as an offset from "now".
+    @State private var startOffset: TimeInterval = 0
+    @State private var panBase: TimeInterval? = nil
+    @State private var zoomBase: Double? = nil
+    /// Time held fixed at the centre while zooming.
+    @State private var zoomAnchor: Date? = nil
+    @State private var dragAxis: DragAxis? = nil
     @State private var scrubDate: Date? = nil
+
+    private enum DragAxis { case horizontal, vertical }
 
     private var axisInk: Color { .primary }
     private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
@@ -45,18 +54,21 @@ struct FoldTimelineView: View {
 
     // MARK: - Interpolated time domain
 
-    private var narrowLo: Date { current?.date ?? series.first?.date ?? nowTick }
-    private var narrowHi: Date { narrowLo.addingTimeInterval(24 * 3600) }
-    private var fullLo: Date { series.first?.date ?? narrowLo }
-    private var fullHi: Date { series.last?.date ?? narrowHi }
-
-    private func lerpDate(_ a: Date, _ b: Date, _ t: Double) -> Date {
-        Date(timeIntervalSinceReferenceDate:
-                a.timeIntervalSinceReferenceDate
-                + (b.timeIntervalSinceReferenceDate - a.timeIntervalSinceReferenceDate) * t)
+    private var dataLo: Date { series.first?.date ?? nowTick }
+    private var dataHi: Date { series.last?.date ?? nowTick.addingTimeInterval(24 * 3600) }
+    /// Widest window the data supports.
+    private var fullSpan: TimeInterval {
+        max(24 * 3600, dataHi.timeIntervalSince(dataLo))
     }
-    private var visLo: Date { lerpDate(narrowLo, fullLo, progress) }
-    private var visHi: Date { lerpDate(narrowHi, fullHi, progress) }
+    /// Visible span, interpolated by the zoom level.
+    private var span: TimeInterval { 24 * 3600 + (fullSpan - 24 * 3600) * zoom }
+
+    private func clampStart(_ o: TimeInterval) -> TimeInterval {
+        TimelineScroll.clampStartOffset(o, span: span, now: nowTick,
+                                        dataLo: dataLo, dataHi: dataHi)
+    }
+    private var visLo: Date { nowTick.addingTimeInterval(clampStart(startOffset)) }
+    private var visHi: Date { visLo.addingTimeInterval(span) }
     private var visDomain: ClosedRange<Date> { visLo...max(visLo.addingTimeInterval(3600), visHi) }
     private var visSpanHours: Double { visDomain.upperBound.timeIntervalSince(visDomain.lowerBound) / 3600 }
 
@@ -124,39 +136,62 @@ struct FoldTimelineView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 8)
                 .contentShape(Rectangle())
-                .gesture(foldDrag(width: geo.size.width))
+                .gesture(foldDrag(size: geo.size))
             }
         }
     }
 
-    /// Swipe hint showing which end of the morph is active.
+    /// Shows how wide the window is and where it starts — the fold has no
+    /// discrete modes any more, so a label beats a two-ended indicator.
     private var modeIndicator: some View {
-        HStack(spacing: 8) {
-            Text("24-hour").fontWeight(progress < 0.5 ? .semibold : .regular)
-                .foregroundStyle(progress < 0.5 ? axisInk : axisInk.opacity(0.5))
-            Image(systemName: "arrow.left.arrow.right").font(.caption2).foregroundStyle(axisInk.opacity(0.5))
-            Text("10-day").fontWeight(progress >= 0.5 ? .semibold : .regular)
-                .foregroundStyle(progress >= 0.5 ? axisInk : axisInk.opacity(0.5))
+        let hours = span / 3600
+        let spanText = hours < 48
+            ? "\(Int(hours.rounded())) hours"
+            : "\(Int((hours / 24).rounded())) days"
+        let f = DateFormatter()
+        f.locale = .current
+        f.setLocalizedDateFormatFromTemplate("EEEd MMM")
+        return HStack(spacing: 6) {
+            Image(systemName: "arrow.up.and.down").font(.caption2)
+                .foregroundStyle(axisInk.opacity(0.5))
+            Text(spanText).fontWeight(.semibold)
+            Text("from \(f.string(from: visLo))").foregroundStyle(axisInk.opacity(0.6))
         }
         .font(.subheadline)
         .frame(maxWidth: .infinity)
     }
 
-    private func foldDrag(width: CGFloat) -> some Gesture {
+    /// Horizontal drag pans through time; vertical drag zooms (up = zoom out).
+    /// Neither snaps, so the user can rest at any zoom level.
+    private func foldDrag(size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { v in
-                guard scrubDate == nil else { return }                 // scrubbing: don't morph
-                guard abs(v.translation.width) > abs(v.translation.height) else { return }
-                if dragBase == nil { dragBase = progress }
-                let span = max(1, width * 0.7)
-                progress = min(1, max(0, (dragBase ?? progress) - v.translation.width / span))
+                guard scrubDate == nil else { return }          // scrubbing wins
+                if dragAxis == nil {
+                    dragAxis = abs(v.translation.width) >= abs(v.translation.height)
+                        ? .horizontal : .vertical
+                }
+                if dragAxis == .horizontal {
+                    if panBase == nil { panBase = startOffset }
+                    let dt = -Double(v.translation.width) / Double(max(1, size.width)) * span
+                    startOffset = clampStart((panBase ?? startOffset) + dt)
+                } else {
+                    if zoomBase == nil {
+                        zoomBase = zoom
+                        zoomAnchor = visLo.addingTimeInterval(span / 2)
+                    }
+                    // Swipe up (negative) zooms out.
+                    let dz = -Double(v.translation.height) / Double(max(1, size.height * 0.6))
+                    zoom = min(1, max(0, (zoomBase ?? zoom) + dz))
+                    // Hold the centre steady so zooming doesn't also scroll.
+                    if let c = zoomAnchor {
+                        startOffset = clampStart(c.addingTimeInterval(-span / 2)
+                                                    .timeIntervalSince(nowTick))
+                    }
+                }
             }
-            .onEnded { v in
-                guard scrubDate == nil else { return }
-                let span = max(1, width * 0.7)
-                let projected = min(1, max(0, (dragBase ?? progress) - v.predictedEndTranslation.width / span))
-                withAnimation(.easeOut(duration: 0.3)) { progress = projected > 0.5 ? 1 : 0 }
-                dragBase = nil
+            .onEnded { _ in
+                dragAxis = nil; panBase = nil; zoomBase = nil; zoomAnchor = nil
             }
     }
 
@@ -240,6 +275,7 @@ struct FoldTimelineView: View {
             .chartLegend(.hidden)
             .chartYScale(domain: dom)
             .chartXScale(domain: visDomain)
+            .chartPlotStyle { $0.clipped() }
             .chartYAxis {
                 AxisMarks(position: .leading, values: .stride(by: 5)) { _ in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
@@ -310,6 +346,7 @@ struct FoldTimelineView: View {
             }
             .chartLegend(.hidden)
             .chartXScale(domain: visDomain)
+            .chartPlotStyle { $0.clipped() }
             .chartYScale(domain: chartStyle == .filled ? [dom.upperBound, dom.lowerBound] : [dom.lowerBound, dom.upperBound])
             .chartYAxis {
                 AxisMarks(position: .leading, values: .stride(by: 10)) { _ in

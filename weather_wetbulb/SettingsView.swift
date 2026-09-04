@@ -80,7 +80,7 @@ struct SettingsView: View {
             Section {
                 Toggle("Table screen", isOn: $showTable)
             } footer: {
-                Text("When off, swiping only switches between the 24-hour and 10-day graph screens.")
+                Text("When off, swiping up/down only switches between the 24-hour and 10-day graph screens.")
             }
 
             Section {
@@ -99,7 +99,7 @@ struct SettingsView: View {
             } header: {
                 Text("Experimental")
             } footer: {
-                Text("Replaces the paged 24-hour and 10-day screens with one timeline: swipe left/right to morph between them — the charts zoom from a single day out to the whole forecast. Long-press a chart to read exact values. (The table screen is hidden while this is on.)")
+                Text("Replaces the paged 24-hour and 10-day screens with one timeline: swipe left/right to scroll through time, and up/down to zoom — from a single day out to the whole ten days of history and forecast, stopping wherever you like. Long-press a chart to read exact values. (The table screen is hidden while this is on.)")
             }
 
             Section {

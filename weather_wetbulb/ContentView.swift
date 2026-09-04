@@ -333,20 +333,26 @@ struct ContentView: View {
 
     private var forecastTableTab: some View {
         VStack(spacing: 0) {
-            tabLabel("table")
+            tabLabel(ForecastScreen.table.title)
             ForecastTableView(
                 weatherService: weather,
                 nowTick: nowTick,
-                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
+                onSwitchScreen: { step in
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        screen = screen.advanced(by: step, includeTable: showTable)
+                        startOffset = clampedOffset(startOffset)
+                    }
+                }
             )
         }
     }
 
     private var foldTab: some View {
         VStack(spacing: 0) {
-            tabLabel("timeline · swipe to zoom")
+            tabLabel("timeline · swipe ↔ to scroll, ↕ to zoom")
             FoldTimelineView(
-                series: weather.isRefreshing ? [] : weather.series10d,
+                series: weather.isRefreshing ? [] : panSeries,
                 current: weather.isRefreshing ? nil : weather.current,
                 progressLoad: weather.loadProgress,
                 nowTick: nowTick,

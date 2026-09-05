@@ -21,6 +21,9 @@ struct FoldTimelineView: View {
     var errorMessage: String? = nil
     var attribution: WeatherAttributionInfo? = nil
     var onRefresh: (() async -> Void)? = nil
+    /// Vertical swipe asks for the table screen (only wired up when the table
+    /// is enabled in Settings). Pinch now owns zooming, which frees this up.
+    var onShowTable: (() -> Void)? = nil
 
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit = true
     @AppStorage(SettingsKey.use12HourClock) private var use12Hour = false
@@ -56,10 +59,11 @@ struct FoldTimelineView: View {
 
     private var dataLo: Date { series.first?.date ?? nowTick }
     private var dataHi: Date { series.last?.date ?? nowTick.addingTimeInterval(24 * 3600) }
-    /// Widest window the data supports.
+    /// Widest window: ten days, or less if that is all the data we have.
     private var fullSpan: TimeInterval {
-        max(24 * 3600, dataHi.timeIntervalSince(dataLo))
+        min(240 * 3600, max(24 * 3600, dataHi.timeIntervalSince(dataLo)))
     }
+    private static let minSpan: TimeInterval = 24 * 3600
     /// Visible span, interpolated by the zoom level.
     private var span: TimeInterval { 24 * 3600 + (fullSpan - 24 * 3600) * zoom }
 
@@ -67,6 +71,13 @@ struct FoldTimelineView: View {
         TimelineScroll.clampStartOffset(o, span: span, now: nowTick,
                                         dataLo: dataLo, dataHi: dataHi)
     }
+    /// Forecast point closest to "now", drawn as prominent dots so the current
+    /// moment is obvious at any zoom level.
+    private var nowPoint: ForecastPoint? {
+        guard let p = nearestForecastPoint(to: nowTick, in: series) else { return nil }
+        return abs(p.date.timeIntervalSince(nowTick)) <= 3600 ? p : nil
+    }
+
     private var visLo: Date { nowTick.addingTimeInterval(clampStart(startOffset)) }
     private var visHi: Date { visLo.addingTimeInterval(span) }
     private var visDomain: ClosedRange<Date> { visLo...max(visLo.addingTimeInterval(3600), visHi) }
@@ -128,15 +139,15 @@ struct FoldTimelineView: View {
                 let avail = max(220, h - 40)
                 VStack(spacing: 8) {
                     modeIndicator
-                    if tempPanelVisible { temperatureChart(height: avail * 0.55) }
-                    if windPanelVisible { precipWindChart(height: avail * 0.36) }
+                    if tempPanelVisible { temperatureChart(height: avail * 0.55, width: geo.size.width) }
+                    if windPanelVisible { precipWindChart(height: avail * 0.36, width: geo.size.width) }
                     if let attribution { WeatherAttributionLink(info: attribution) }
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 8)
                 .contentShape(Rectangle())
-                .gesture(foldDrag(size: geo.size))
+                .gesture(foldDrag(size: geo.size).simultaneously(with: foldMagnify()))
             }
         }
     }
@@ -152,7 +163,7 @@ struct FoldTimelineView: View {
         f.locale = .current
         f.setLocalizedDateFormatFromTemplate("EEEd MMM")
         return HStack(spacing: 6) {
-            Image(systemName: "arrow.up.and.down").font(.caption2)
+            Image(systemName: "arrow.left.and.right").font(.caption2)
                 .foregroundStyle(axisInk.opacity(0.5))
             Text(spanText).fontWeight(.semibold)
             Text("from \(f.string(from: visLo))").foregroundStyle(axisInk.opacity(0.6))
@@ -161,38 +172,51 @@ struct FoldTimelineView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Horizontal drag pans through time; vertical drag zooms (up = zoom out).
-    /// Neither snaps, so the user can rest at any zoom level.
+    /// Horizontal drag pans through time; a vertical drag asks for the table.
+    /// Zooming is a pinch (below), which is the gesture people expect.
     private func foldDrag(size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 14)
             .onChanged { v in
                 guard scrubDate == nil else { return }          // scrubbing wins
                 if dragAxis == nil {
                     dragAxis = abs(v.translation.width) >= abs(v.translation.height)
                         ? .horizontal : .vertical
                 }
-                if dragAxis == .horizontal {
-                    if panBase == nil { panBase = startOffset }
-                    let dt = -Double(v.translation.width) / Double(max(1, size.width)) * span
-                    startOffset = clampStart((panBase ?? startOffset) + dt)
-                } else {
-                    if zoomBase == nil {
-                        zoomBase = zoom
-                        zoomAnchor = visLo.addingTimeInterval(span / 2)
-                    }
-                    // Swipe up (negative) zooms out.
-                    let dz = -Double(v.translation.height) / Double(max(1, size.height * 0.6))
-                    zoom = min(1, max(0, (zoomBase ?? zoom) + dz))
-                    // Hold the centre steady so zooming doesn't also scroll.
-                    if let c = zoomAnchor {
-                        startOffset = clampStart(c.addingTimeInterval(-span / 2)
-                                                    .timeIntervalSince(nowTick))
-                    }
+                guard dragAxis == .horizontal else { return }
+                if panBase == nil { panBase = startOffset }
+                let dt = -Double(v.translation.width) / Double(max(1, size.width)) * span
+                startOffset = clampStart((panBase ?? startOffset) + dt)
+            }
+            .onEnded { v in
+                defer { dragAxis = nil; panBase = nil }
+                if dragAxis == .vertical, abs(v.translation.height) > 40 {
+                    onShowTable?()
                 }
             }
-            .onEnded { _ in
-                dragAxis = nil; panBase = nil; zoomBase = nil; zoomAnchor = nil
+    }
+
+    /// Pinch to zoom, anchored on the middle of the window so the view does not
+    /// slide sideways while zooming. Nothing snaps: any span is a resting place.
+    private func foldMagnify() -> some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.01)
+            .onChanged { v in
+                guard scrubDate == nil else { return }
+                if zoomBase == nil {
+                    zoomBase = zoom
+                    zoomAnchor = visLo.addingTimeInterval(span / 2)
+                }
+                let range = max(1, fullSpan - Self.minSpan)
+                let baseSpan = Self.minSpan + range * (zoomBase ?? zoom)
+                // Pinch out (magnification > 1) shows less time = zoom in.
+                let wanted = baseSpan / max(0.05, v.magnification)
+                let clamped = min(fullSpan, max(Self.minSpan, wanted))
+                zoom = (clamped - Self.minSpan) / range
+                if let c = zoomAnchor {
+                    startOffset = clampStart(c.addingTimeInterval(-span / 2)
+                                                .timeIntervalSince(nowTick))
+                }
             }
+            .onEnded { _ in zoomBase = nil; zoomAnchor = nil }
     }
 
     // MARK: - X axis (adaptive: hours when zoomed in, days when zoomed out)
@@ -202,7 +226,7 @@ struct FoldTimelineView: View {
     }()
 
     @AxisContentBuilder
-    private func foldXAxis() -> some AxisContent {
+    private func foldXAxis(width: CGFloat) -> some AxisContent {
         if visSpanHours < 60 {
             AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                 AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
@@ -220,7 +244,8 @@ struct FoldTimelineView: View {
                 AxisTick().foregroundStyle(axisInk.opacity(0.6))
                 AxisValueLabel {
                     if let d = value.as(Date.self) {
-                        Text(String(FoldTimelineView.dayFmt.string(from: d).prefix(2)))
+                        Text(dayTickLabel(d, includeWeekday: dayAxisFitsWeekday(
+                                plotWidth: width, days: visSpanHours / 24)))
                             .font(.caption).foregroundStyle(axisInk)
                     }
                 }
@@ -231,12 +256,13 @@ struct FoldTimelineView: View {
     // MARK: - Temperature chart
 
     @ViewBuilder
-    private func temperatureChart(height: CGFloat) -> some View {
+    private func temperatureChart(height: CGFloat, width: CGFloat) -> some View {
         let dom = tempYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: tempLegend, ink: axisInk).padding(.leading, 36)
-            Chart(series) { p in
+            Chart {
+                ForEach(series) { p in
                 if chartStyle == .filled {
                     if graphTemp {
                         AreaMark(x: .value("Time", p.date), yStart: .value("b", base),
@@ -271,6 +297,33 @@ struct FoldTimelineView: View {
                     LineMark(x: .value("Time", p.date), y: .value("Feels", useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC), series: .value("s", "app"))
                         .foregroundStyle(palette.purple).interpolationMethod(.linear).lineStyle(StrokeStyle(lineWidth: 1.5))
                 }
+                }
+                // Solid dots at the current time, so "now" stays obvious at any
+                // zoom level and wherever the window has been scrolled to.
+                if let n = nowPoint {
+                    if graphTemp {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Temp", useFahrenheit ? n.temperatureF : n.temperatureC))
+                            .foregroundStyle(chartStyle == .filled ? palette.green : palette.blue)
+                            .symbolSize(120)
+                    }
+                    if graphWetBulb {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Wet", useFahrenheit ? n.wetBulbF : n.wetBulbC))
+                            .foregroundStyle(chartStyle == .filled ? palette.blue : palette.green)
+                            .symbolSize(120)
+                    }
+                    if graphDewPoint {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Dew", useFahrenheit ? n.dewPointF : n.dewPointC))
+                            .foregroundStyle(palette.red).symbolSize(120)
+                    }
+                    if graphFeels {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Feels", useFahrenheit ? n.apparentTemperatureF : n.apparentTemperatureC))
+                            .foregroundStyle(palette.purple).symbolSize(120)
+                    }
+                }
             }
             .chartLegend(.hidden)
             .chartYScale(domain: dom)
@@ -283,7 +336,7 @@ struct FoldTimelineView: View {
                     AxisValueLabel().font(.caption).foregroundStyle(axisInk)
                 }
             }
-            .chartXAxis { foldXAxis() }
+            .chartXAxis { foldXAxis(width: width) }
             .chartOverlay { proxy in scrubOverlay(proxy) }
             // Trailing side: on the leading side it collides with a three-digit
             // top y-axis label (e.g. 100 °F).
@@ -299,11 +352,12 @@ struct FoldTimelineView: View {
     // MARK: - Precip / wind chart
 
     @ViewBuilder
-    private func precipWindChart(height: CGFloat) -> some View {
+    private func precipWindChart(height: CGFloat, width: CGFloat) -> some View {
         let dom = windYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
-            Chart(series) { p in
+            Chart {
+                ForEach(series) { p in
                 let gust = useFahrenheit ? p.windGustMPH : p.windGustKPH
                 let wind = useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH
                 if chartStyle == .filled {
@@ -343,6 +397,19 @@ struct FoldTimelineView: View {
                             .foregroundStyle(palette.red).interpolationMethod(.linear).symbol(Circle()).symbolSize(0)
                     }
                 }
+                }
+                if let n = nowPoint {
+                    if graphWind {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Wind", useFahrenheit ? n.windSpeedMPH : n.windSpeedKPH))
+                            .foregroundStyle(palette.red).symbolSize(120)
+                    }
+                    if graphPrecip {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Precip", n.precipProbability * 100))
+                            .foregroundStyle(palette.blue).symbolSize(120)
+                    }
+                }
             }
             .chartLegend(.hidden)
             .chartXScale(domain: visDomain)
@@ -355,7 +422,7 @@ struct FoldTimelineView: View {
                     AxisValueLabel().font(.caption).foregroundStyle(axisInk)
                 }
             }
-            .chartXAxis { foldXAxis() }
+            .chartXAxis { foldXAxis(width: width) }
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
 

@@ -100,8 +100,12 @@ struct ChartLegendRow: View {
             ForEach(items, id: \.label) { e in
                 HStack(spacing: 4) {
                     if e.isArea {
+                        // Full strength: the charts draw their bands at full
+                        // opacity, so dimming the swatch made a vivid palette
+                        // look muted in the legend. Entries that really are
+                        // translucent (gust) pass their own opacity in.
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(e.color.opacity(0.4))
+                            .fill(e.color)
                             .frame(width: 18, height: 8)
                     } else {
                         Rectangle()
@@ -261,4 +265,38 @@ struct ScrubReadoutCard: View {
             Text(value).font(.caption2.weight(.medium)).monospacedDigit().foregroundStyle(tint)
         }
     }
+}
+
+// MARK: - Day axis labels
+
+private let weekdayFmt: DateFormatter = {
+    let f = DateFormatter(); f.locale = .current; f.dateFormat = "EEE"; return f
+}()
+
+/// Label for a day tick on a scrolled/zoomed axis.
+///
+/// Once the window covers many days there isn't room for "Mo 15" on every tick —
+/// two-digit days of the month are the tight case — so the caller works out how
+/// much width each tick gets and we drop the weekday when it won't fit.
+func dayTickLabel(_ date: Date, includeWeekday: Bool) -> String {
+    let day = Calendar.current.component(.day, from: date)
+    guard includeWeekday else { return "\(day)" }
+    let wd = String(weekdayFmt.string(from: date).prefix(2))
+    return "\(wd) \(day)"
+}
+
+/// Whether a day axis has room for the weekday as well as the day number.
+/// `plotWidth` is the chart's width; `days` the number of day ticks across it.
+///
+/// Measured rather than guessed: with the weekday forced on, a 10-day window on
+/// an iPhone 17 (402 pt wide, so ~35 pt per tick) truncated "Mo 31" to "Mo…"
+/// while single-digit days like "Tu 1" still fitted. Two-digit days of the month
+/// are therefore the binding case, and they need about 44 pt. We apply that one
+/// threshold to every window rather than switching style as the month rolls
+/// over, which would make the labels flicker between forms while scrolling.
+/// The narrowest supported iPhone (SE, 375 pt) is tighter still, so a window
+/// that fails here fails there too.
+func dayAxisFitsWeekday(plotWidth: CGFloat, days: Double) -> Bool {
+    guard days > 0 else { return true }
+    return (plotWidth - 56) / days >= 44
 }

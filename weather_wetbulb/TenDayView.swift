@@ -206,9 +206,13 @@ struct TenDayView: View {
                         .padding()
                         .frame(minHeight: h)
                 } else {
+                    // Fill the screen: take off the fixed chrome (two legends,
+                    // the attribution link, stack spacing) and split the rest.
+                    let chrome: CGFloat = 16 + 16 + 18 + 16
+                    let avail = max(200, h - chrome)
                     VStack(spacing: 8) {
-                        if tempPanelVisible { temperatureChart(height: h * 0.55, width: w) }
-                        if windPanelVisible { precipWindChart(height: h * 0.36, width: w) }
+                        if tempPanelVisible { temperatureChart(height: avail * 0.60, width: w) }
+                        if windPanelVisible { precipWindChart(height: avail * 0.40, width: w) }
                         if let attribution {
                             WeatherAttributionLink(info: attribution)
                         }

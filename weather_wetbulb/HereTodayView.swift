@@ -202,9 +202,13 @@ struct HereTodayView: View {
                         .padding()
                         .frame(minHeight: h)
                 } else {
+                    // Fill the screen: take off the fixed chrome (two legends,
+                    // the attribution link, stack spacing) and split the rest.
+                    let chrome: CGFloat = 16 + 16 + 18 + 16
+                    let avail = max(200, h - chrome)
                     VStack(spacing: 8) {
-                        if tempPanelVisible { temperatureChart(height: h * 0.55) }
-                        if windPanelVisible { precipWindChart(height: h * 0.36) }
+                        if tempPanelVisible { temperatureChart(height: avail * 0.60) }
+                        if windPanelVisible { precipWindChart(height: avail * 0.40) }
                         if let attribution {
                             WeatherAttributionLink(info: attribution)
                         }
@@ -317,22 +321,22 @@ struct HereTodayView: View {
                     if graphTemp {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Temp", useFahrenheit ? c.temperatureF : c.temperatureC))
-                            .foregroundStyle(palette.green).symbolSize(110)
+                            .symbol { NowMarkerSymbol(color: palette.green, isDaylight: c.isDaylight) }
                     }
                     if graphWetBulb {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Wet Bulb", useFahrenheit ? c.wetBulbF : c.wetBulbC))
-                            .foregroundStyle(palette.blue).symbolSize(110)
+                            .symbol { NowMarkerSymbol(color: palette.blue, isDaylight: c.isDaylight) }
                     }
                     if graphDewPoint {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Dew Point", useFahrenheit ? c.dewPointF : c.dewPointC))
-                            .foregroundStyle(palette.red).symbolSize(110)
+                            .symbol { NowMarkerSymbol(color: palette.red, isDaylight: c.isDaylight) }
                     }
                     if graphFeels {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Feels like", useFahrenheit ? c.apparentTemperatureF : c.apparentTemperatureC))
-                            .foregroundStyle(palette.purple).symbolSize(110)
+                            .symbol { NowMarkerSymbol(color: palette.purple, isDaylight: c.isDaylight) }
                     }
                 }
             }

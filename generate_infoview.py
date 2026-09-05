@@ -221,6 +221,12 @@ def generate(items: list) -> str:
         out.pop()
 
     out += [
+        "",
+        "                // Which build this is, at the foot of the screen.",
+        "                Text(BuildInfo.versionAndDate)",
+        "                    .font(.caption2)",
+        "                    .foregroundStyle(.secondary)",
+        "                    .accessibilityLabel(\"Version \\(BuildInfo.versionAndDate)\")",
         "            }",
         "            .padding(.horizontal, 16)",
         "            .padding(.vertical, 16)",

@@ -78,6 +78,16 @@ struct FoldTimelineView: View {
         return abs(p.date.timeIntervalSince(nowTick)) <= 3600 ? p : nil
     }
 
+    /// True for ticks hard against either edge of the window, where the label
+    /// would be half outside the plot and get ellipsised to "…".
+    private func tickTooCloseToEdge(_ d: Date, plotWidth: CGFloat) -> Bool {
+        // Only ticks essentially on the edge: the label sizes itself
+        // (fixedSize) so it no longer needs half its width of clearance.
+        let usable = max(1, Double(plotWidth) - 56)
+        let margin = span * (12.0 / usable)
+        return d.timeIntervalSince(visLo) < margin || visHi.timeIntervalSince(d) < margin
+    }
+
     private var visLo: Date { nowTick.addingTimeInterval(clampStart(startOffset)) }
     private var visHi: Date { visLo.addingTimeInterval(span) }
     private var visDomain: ClosedRange<Date> { visLo...max(visLo.addingTimeInterval(3600), visHi) }
@@ -243,10 +253,12 @@ struct FoldTimelineView: View {
                 AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
                 AxisTick().foregroundStyle(axisInk.opacity(0.6))
                 AxisValueLabel {
-                    if let d = value.as(Date.self) {
+                    if let d = value.as(Date.self),
+                       !tickTooCloseToEdge(d, plotWidth: width) {
                         Text(dayTickLabel(d, includeWeekday: dayAxisFitsWeekday(
                                 plotWidth: width, days: visSpanHours / 24)))
                             .font(.caption).foregroundStyle(axisInk)
+                            .fixedSize()          // never ellipsise to "…"
                     }
                 }
             }

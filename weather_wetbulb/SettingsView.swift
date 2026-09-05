@@ -81,22 +81,13 @@ struct SettingsView: View {
             }
 
             Section {
+                // Zooming is a pinch now, so the vertical swipe is free for the
+                // table: fold mode no longer has to hide it.
                 Toggle("Fold timeline", isOn: $useFoldTimeline)
-                    .onChange(of: useFoldTimeline) { _, on in
-                        if on {
-                            // Fold mode is a single screen and owns the swipe, so
-                            // the table is hidden while it's on (remember the prior
-                            // choice to restore it later).
-                            UserDefaults.standard.set(showTable, forKey: SettingsKey.tableBeforeFold)
-                            showTable = false
-                        } else {
-                            showTable = UserDefaults.standard.bool(forKey: SettingsKey.tableBeforeFold)
-                        }
-                    }
             } header: {
                 Text("Experimental")
             } footer: {
-                Text("Replaces the paged 24-hour and 10-day screens with one timeline: swipe left/right to scroll through time, and up/down to zoom — from a single day out to the whole ten days of history and forecast, stopping wherever you like. Long-press a chart to read exact values. (The table screen is hidden while this is on.)")
+                Text("Replaces the paged 24-hour and 10-day screens with one timeline: swipe left/right to scroll through time, and pinch to zoom — from a single day out to ten days, stopping wherever you like. Swipe up or down for the table (when it is on), and long-press a chart to read exact values.")
             }
 
             // NOTE: the indoor-comfort (HomeKit) section and the iCloud sync

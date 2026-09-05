@@ -111,11 +111,17 @@ struct TenDayView: View {
         "Thu": "Th", "Fri": "Fr", "Sat": "Sa", "Sun": "Su"
     ]
 
-    private func dayLabel(for date: Date) -> String {
+    /// Day tick label. Includes the day of the month, and the weekday too when
+    /// the axis is wide enough for both (see dayAxisFitsWeekday).
+    private func dayLabel(for date: Date, width: CGFloat) -> String {
         guard let start = startMidnight, date >= start,
               Calendar.current.component(.hour, from: date) == 0 else { return "" }
+        let days = windowSpan / (24 * 3600)
+        let day = Calendar.current.component(.day, from: date)
+        guard dayAxisFitsWeekday(plotWidth: width, days: days) else { return "\(day)" }
         let key = TenDayView.dayFormatter.string(from: date)
-        return TenDayView.dayAbbreviations[key] ?? String(key.prefix(2))
+        let wd = TenDayView.dayAbbreviations[key] ?? String(key.prefix(2))
+        return "\(wd) \(day)"
     }
 
     // MARK: - Scrubbing
@@ -190,6 +196,7 @@ struct TenDayView: View {
     var body: some View {
         GeometryReader { geo in
             let h = geo.size.height
+            let w = geo.size.width
             // Deliberately not a ScrollView: the content is sized to the screen,
             // and a scroll view would swallow the vertical drag that now
             // switches screens.
@@ -200,8 +207,8 @@ struct TenDayView: View {
                         .frame(minHeight: h)
                 } else {
                     VStack(spacing: 8) {
-                        if tempPanelVisible { temperatureChart(height: h * 0.55) }
-                        if windPanelVisible { precipWindChart(height: h * 0.36) }
+                        if tempPanelVisible { temperatureChart(height: h * 0.55, width: w) }
+                        if windPanelVisible { precipWindChart(height: h * 0.36, width: w) }
                         if let attribution {
                             WeatherAttributionLink(info: attribution)
                         }
@@ -214,18 +221,18 @@ struct TenDayView: View {
     }
 
     @ViewBuilder
-    private func temperatureChart(height: CGFloat) -> some View {
+    private func temperatureChart(height: CGFloat, width: CGFloat) -> some View {
         switch chartStyle {
-        case .classic: classicTemperatureChart(height: height)
-        case .filled:  filledTemperatureChart(height: height)
+        case .classic: classicTemperatureChart(height: height, width: width)
+        case .filled:  filledTemperatureChart(height: height, width: width)
         }
     }
 
     @ViewBuilder
-    private func precipWindChart(height: CGFloat) -> some View {
+    private func precipWindChart(height: CGFloat, width: CGFloat) -> some View {
         switch chartStyle {
-        case .classic: classicPrecipWindChart(height: height)
-        case .filled:  filledPrecipWindChart(height: height)
+        case .classic: classicPrecipWindChart(height: height, width: width)
+        case .filled:  filledPrecipWindChart(height: height, width: width)
         }
     }
 
@@ -268,7 +275,7 @@ struct TenDayView: View {
     // MARK: - Filled style
 
     @ViewBuilder
-    private func filledTemperatureChart(height: CGFloat) -> some View {
+    private func filledTemperatureChart(height: CGFloat, width: CGFloat) -> some View {
         let dom = tempYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
@@ -319,7 +326,7 @@ struct TenDayView: View {
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
                     AxisTick().foregroundStyle(axisInk.opacity(0.6))
                     AxisValueLabel {
-                        Text(value.as(Date.self).map { dayLabel(for: $0) } ?? "")
+                        Text(value.as(Date.self).map { dayLabel(for: $0, width: width) } ?? "")
                             .font(.caption).foregroundStyle(axisInk)
                     }
                 }
@@ -342,7 +349,7 @@ struct TenDayView: View {
     }
 
     @ViewBuilder
-    private func filledPrecipWindChart(height: CGFloat) -> some View {
+    private func filledPrecipWindChart(height: CGFloat, width: CGFloat) -> some View {
         let dom = windYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
@@ -409,7 +416,7 @@ struct TenDayView: View {
     // MARK: - Classic style (original line charts)
 
     @ViewBuilder
-    private func classicTemperatureChart(height: CGFloat) -> some View {
+    private func classicTemperatureChart(height: CGFloat, width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: classicTempLegend)
                 .padding(.leading, 8)
@@ -453,7 +460,7 @@ struct TenDayView: View {
                 AxisMarks(values: .stride(by: .day, count: 1)) { value in
                     AxisGridLine(); AxisTick()
                     AxisValueLabel {
-                        Text(value.as(Date.self).map { dayLabel(for: $0) } ?? "")
+                        Text(value.as(Date.self).map { dayLabel(for: $0, width: width) } ?? "")
                             .font(.caption)
                     }
                 }
@@ -467,7 +474,7 @@ struct TenDayView: View {
     }
 
     @ViewBuilder
-    private func classicPrecipWindChart(height: CGFloat) -> some View {
+    private func classicPrecipWindChart(height: CGFloat, width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: classicWindLegend)
                 .padding(.leading, 8)
@@ -506,7 +513,7 @@ struct TenDayView: View {
                 AxisMarks(values: .stride(by: .day, count: 1)) { value in
                     AxisGridLine(); AxisTick()
                     AxisValueLabel {
-                        Text(value.as(Date.self).map { dayLabel(for: $0) } ?? "")
+                        Text(value.as(Date.self).map { dayLabel(for: $0, width: width) } ?? "")
                             .font(.caption)
                     }
                 }

@@ -25,6 +25,11 @@ struct ContentView: View {
     /// Locked once a drag has clearly chosen an axis, so a diagonal swipe
     /// doesn't both pan and switch screens.
     @State private var dragAxis: DragAxis? = nil
+    /// How far the screen has been dragged vertically, so the screens move with
+    /// the finger instead of jumping at the end of the gesture.
+    @State private var dragY: CGFloat = 0
+    /// With the fold timeline on, whether the table is showing instead.
+    @State private var foldShowsTable = false
 
     private enum DragAxis { case horizontal, vertical }
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
@@ -74,17 +79,26 @@ struct ContentView: View {
             Divider()
 
             if useFoldTimeline {
-                foldTab
+                if showTable && foldShowsTable {
+                    forecastTableTab
+                } else {
+                    foldTab
+                }
             } else {
                 GeometryReader { geo in
+                    let hgt = geo.size.height
                     ZStack {
-                        switch screen {
-                        case .today:  hereTodayTab
-                        case .tenDay: tenDayTab
-                        case .table:  forecastTableTab
+                        // The screen being dragged towards, parked just off the
+                        // edge so it slides in with the finger.
+                        if dragY != 0 {
+                            screenView(screen.advanced(by: dragY < 0 ? 1 : -1,
+                                                       includeTable: showTable))
+                                .offset(y: dragY < 0 ? hgt + dragY : -hgt + dragY)
                         }
+                        screenView(screen).offset(y: dragY)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                     .contentShape(Rectangle())
                     // The table owns its own vertical scrolling, so it opts out
                     // of this gesture and switches screens on over-scroll instead.
@@ -197,7 +211,10 @@ struct ContentView: View {
                     dragAxis = abs(v.translation.width) >= abs(v.translation.height)
                         ? .horizontal : .vertical
                 }
-                guard dragAxis == .horizontal else { return }
+                if dragAxis == .vertical {
+                    dragY = v.translation.height
+                    return
+                }
                 if panBase == nil { panBase = startOffset }
                 // Dragging a full screen width pans by one window span.
                 let span = screen.span
@@ -205,17 +222,34 @@ struct ContentView: View {
                 startOffset = clampedOffset((panBase ?? startOffset) + dt)
             }
             .onEnded { v in
-                defer { dragAxis = nil; panBase = nil }
-                if dragAxis == .vertical {
-                    let dy = v.translation.height
-                    guard abs(dy) > 40 else { return }
-                    // Swipe up = next screen, swipe down = previous.
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        screen = screen.advanced(by: dy < 0 ? 1 : -1, includeTable: showTable)
+                let axis = dragAxis
+                dragAxis = nil; panBase = nil
+                guard axis == .vertical else { return }
+                let dy = v.translation.height
+                let step = dy < 0 ? 1 : -1
+                // Carry the screen the rest of the way if the swipe was
+                // decisive, otherwise let it fall back.
+                if abs(dy) > 60 {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        dragY = dy < 0 ? -size.height : size.height
+                    } completion: {
+                        screen = screen.advanced(by: step, includeTable: showTable)
                         startOffset = clampedOffset(startOffset)
+                        dragY = 0
                     }
+                } else {
+                    withAnimation(.easeOut(duration: 0.2)) { dragY = 0 }
                 }
             }
+    }
+
+    @ViewBuilder
+    private func screenView(_ s: ForecastScreen) -> some View {
+        switch s {
+        case .today:  hereTodayTab
+        case .tenDay: tenDayTab
+        case .table:  forecastTableTab
+        }
     }
 
     private func clampedOffset(_ o: TimeInterval) -> TimeInterval {
@@ -315,17 +349,57 @@ struct ContentView: View {
         }
     }
 
+    /// The table's header doubles as navigation: reaching a graph by scrolling
+    /// 10 days to an end is impractical, so the graphs get buttons here.
+    private var tableHeader: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Text(ForecastScreen.table.title)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                HStack {
+                    if useFoldTimeline {
+                        Button("timeline") {
+                            withAnimation(.easeInOut(duration: 0.25)) { foldShowsTable = false }
+                        }
+                        Spacer()
+                    } else {
+                        Button("24h graph") { goToScreen(.today) }
+                        Spacer()
+                        Button("10-day graph") { goToScreen(.tenDay) }
+                    }
+                }
+                .font(.subheadline)
+                .padding(.horizontal)
+            }
+            .padding(.vertical, 5)
+            .background(.bar)
+            Divider()
+        }
+    }
+
+    private func goToScreen(_ s: ForecastScreen) {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            screen = s
+            startOffset = clampedOffset(startOffset)
+        }
+    }
+
     private var forecastTableTab: some View {
         VStack(spacing: 0) {
-            tabLabel(ForecastScreen.table.title)
+            tableHeader
             ForecastTableView(
                 weatherService: weather,
                 nowTick: nowTick,
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
                 onSwitchScreen: { step in
                     withAnimation(.easeInOut(duration: 0.25)) {
-                        screen = screen.advanced(by: step, includeTable: showTable)
-                        startOffset = clampedOffset(startOffset)
+                        if useFoldTimeline {
+                            foldShowsTable = false      // back to the timeline
+                        } else {
+                            screen = screen.advanced(by: step, includeTable: showTable)
+                            startOffset = clampedOffset(startOffset)
+                        }
                     }
                 }
             )
@@ -342,7 +416,12 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
+                onShowTable: {
+                    if showTable {
+                        withAnimation(.easeInOut(duration: 0.25)) { foldShowsTable = true }
+                    }
+                }
             )
         }
     }

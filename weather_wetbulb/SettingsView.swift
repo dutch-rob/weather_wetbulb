@@ -83,11 +83,11 @@ struct SettingsView: View {
             Section {
                 // Zooming is a pinch now, so the vertical swipe is free for the
                 // table: fold mode no longer has to hide it.
-                Toggle("Fold timeline", isOn: $useFoldTimeline)
+                Toggle("Zoom graph", isOn: $useFoldTimeline)
             } header: {
                 Text("Experimental")
             } footer: {
-                Text("Replaces the paged 24-hour and 10-day screens with one timeline: swipe left/right to scroll through time, and pinch to zoom — from a single day out to ten days, stopping wherever you like. Swipe up or down for the table (when it is on), and long-press a chart to read exact values.")
+                Text("Replaces the paged 24-hour and 10-day screens with one graph you zoom: swipe left/right to scroll through time, and pinch to zoom — from a single day out to ten days, stopping wherever you like. Buttons at the top switch to the table, and long-press a chart to read exact values.")
             }
 
             // NOTE: the indoor-comfort (HomeKit) section and the iCloud sync

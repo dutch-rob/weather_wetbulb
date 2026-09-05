@@ -13,13 +13,14 @@ struct InfoView: View {
 
                 Group {
                     Text("Start screen: 24 hour forecast").font(.headline)
-                    Text("WetBulbCast starts on the screen showing 24 hour weather forecast graphs for your current location. The app reads the past 10 days of weather as well as the forecast, so you can scroll back to see what the weather actually did. The top graph shows temperature, wet-bulb temperature and dew point, plus the \"feels like\" temperature reported by Apple Weather. The bottom graph shows wind speed, gusts and chance of precipitation. Solid dots mark the current time on both graphs, so \"now\" stays easy to find however far you have scrolled or zoomed. Above the graphs, the current place is listed — tap it to switch places. Below the graphs are buttons to")
+                    Text("WetBulbCast starts on the screen showing 24 hour weather forecast graphs for your current location. The app reads the past 10 days of weather as well as the forecast, so you can scroll back to see what the weather actually did. The top graph shows temperature, wet-bulb temperature and dew point, plus the \"feels like\" temperature reported by Apple Weather. The bottom graph shows wind speed, gusts and chance of precipitation. Ringed dots mark the current time on both graphs — light-centred by day and dark-centred at night — so \"now\" stays easy to find however far you have scrolled or zoomed. Above the graphs, the current place is listed — tap it to switch places. Below the graphs are buttons to")
                     VStack(alignment: .leading, spacing: 8) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("    • Switch between Celsius and Fahrenheit")
                             Text("    • Switch to another place")
                             Text("    • Open Settings (the cog wheel), which also holds the About screen with this info")
                             Text("    • Refresh the forecast (the circular arrow, top right)")
+                            Text("    • Open this info screen (the \"i\" button, next to the cog wheel)")
                         }
                     }
                 }
@@ -32,7 +33,8 @@ struct InfoView: View {
                 Group {
                     Text("Swiping").font(.headline)
                     Text("On a graph screen, swiping left or right scrolls the graph through time. The graph starts at the current time; swipe right to go back, up to 10 days into the past, and left to go forward, up to 10 days ahead. Both graph screens share the same position, so the place you scrolled to is still there when you switch screens.")
-                    Text("Swiping up or down switches screens: between the 24 hour graph, the 10 day graph and the table. The screen follows your finger, so you can see where you are heading before you let go. On the table, scrolling past the top or the bottom switches screens in the same way, and the buttons at the top of the table (\"24h graph\" and \"10-day graph\") jump straight to a graph without scrolling.")
+                    Text("Swiping up or down switches between the two graph screens, and the screen follows your finger so you can see where you are heading before you let go.")
+                    Text("Every screen has a button at each side of its title for the two screens you are not on, which is the quickest way to the table and back. Switching between a graph and the table keeps your place in time: the graph starts at whatever hour is at the top of the table, and the table opens at whatever the graph is showing.")
                     Text("To reload your location and forecast, use the refresh button next to the place name at the top.")
                 }
 
@@ -58,14 +60,14 @@ struct InfoView: View {
                             Text("    • Show on graphs: which series to draw — temperature, wet bulb, dew point, feels like, precipitation, wind and gusts. Emptying a panel hides it")
                             Text("    • Chart style: \"Filled\" draws each series as a shaded band with a marker at the current conditions, \"Classic\" draws thin lines; colors can be vivid or muted")
                             Text("    • Table screen: turn the table off if you only want the two graph screens")
-                            Text("    • Fold timeline: see below")
+                            Text("    • Zoom graph: see below")
                         }
                     }
                 }
 
                 Group {
-                    Text("Fold timeline (experimental)").font(.headline)
-                    Text("Instead of paging between a 24-hour screen and a 10-day screen, the fold timeline puts both on one screen. Swipe left or right to scroll through time, and pinch to zoom: from a single day out to ten days, stopping at any zoom level in between. The heading tells you how wide the window is and where it starts. Swiping up or down brings up the table (when you have it switched on), and the scrubber works here too.")
+                    Text("Zoom graph (experimental)").font(.headline)
+                    Text("Instead of paging between a 24-hour screen and a 10-day screen, the zoom graph puts both on one screen. Swipe left or right to scroll through time, and pinch to zoom: from a single day out to ten days, stopping at any zoom level in between. The heading tells you how wide the window is and where it starts. A button at the top switches to the table, and the scrubber works here too.")
                 }
 
                 Group {
@@ -82,6 +84,12 @@ struct InfoView: View {
                         Text("2. You are quite welcome to provide any feedback in your review comments in the App Store, or go to GitHub and provide your comments there. Perhaps you even want to do a pull request for improvements of the code. If you found that something went wrong, please specify.")
                     }
                 }
+
+                // Which build this is, at the foot of the screen.
+                Text(BuildInfo.versionAndDate)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Version \(BuildInfo.versionAndDate)")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)

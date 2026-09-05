@@ -15,6 +15,11 @@ import Charts
 
 struct FoldTimelineView: View {
     var series: [ForecastPoint]          // 10-day
+    /// Left edge of the visible window, as an offset from "now". Shared with
+    /// ContentView so the table and the graph stay on the same moment; it
+    /// starts an hour early so the current-time markers are not clipped by the
+    /// plot edge.
+    @Binding var startOffset: TimeInterval
     var current: ForecastPoint? = nil
     var progressLoad: LoadProgress = LoadProgress()
     var nowTick: Date = .now
@@ -40,8 +45,6 @@ struct FoldTimelineView: View {
     /// Zoom level: 0 = a 24-hour window, 1 = the whole -10d…+10d series.
     /// Not snapped, so any intermediate zoom is a valid resting place.
     @State private var zoom: Double = 0
-    /// Left edge of the visible window, as an offset from "now".
-    @State private var startOffset: TimeInterval = 0
     @State private var panBase: TimeInterval? = nil
     @State private var zoomBase: Double? = nil
     /// Time held fixed at the centre while zooming.
@@ -93,11 +96,22 @@ struct FoldTimelineView: View {
     private var visDomain: ClosedRange<Date> { visLo...max(visLo.addingTimeInterval(3600), visHi) }
     private var visSpanHours: Double { visDomain.upperBound.timeIntervalSince(visDomain.lowerBound) / 3600 }
 
-    // MARK: - Y ranges (over all data, stable while zooming)
+    // MARK: - Y ranges
+
+    /// Points inside the visible window. The y-ranges are computed from these
+    /// rather than the whole ±10 days: scaling to data that is off-screen left
+    /// the charts using only part of their height (a distant 45 mph gust made
+    /// the wind panel reserve room for it while showing an 18 mph day).
+    private var visibleSeries: [ForecastPoint] {
+        let lo = visLo.addingTimeInterval(-2 * 3600)
+        let hi = visHi.addingTimeInterval(2 * 3600)
+        let inWindow = series.filter { $0.date >= lo && $0.date <= hi }
+        return inWindow.isEmpty ? series : inWindow
+    }
 
     private var tempYDomain: ClosedRange<Double> {
         var v: [Double] = []
-        for p in series {
+        for p in visibleSeries {
             if graphTemp     { v.append(useFahrenheit ? p.temperatureF : p.temperatureC) }
             if graphWetBulb  { v.append(useFahrenheit ? p.wetBulbF : p.wetBulbC) }
             if graphDewPoint { v.append(useFahrenheit ? p.dewPointF : p.dewPointC) }
@@ -109,7 +123,7 @@ struct FoldTimelineView: View {
     }
     private var windYDomain: ClosedRange<Double> {
         var v: [Double] = []
-        for p in series {
+        for p in visibleSeries {
             if graphPrecip { v.append(p.precipProbability * 100) }
             if graphGust   { v.append(useFahrenheit ? p.windGustMPH : p.windGustKPH) }
             if graphWind   { v.append(useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH) }
@@ -146,13 +160,17 @@ struct FoldTimelineView: View {
                 ForecastLoadingView(progress: progressLoad, nowTick: nowTick, errorMessage: errorMessage)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                let avail = max(220, h - 40)
+                // Height left for the charts once the fixed chrome (span
+                // indicator, the two legends, the attribution link and the
+                // stack spacing) is accounted for, so they fill the screen
+                // instead of leaving a gap at the bottom.
+                let chrome: CGFloat = 22 + 16 + 18 + 16   // measured against the rendered screen
+                let avail = max(200, h - chrome)
                 VStack(spacing: 8) {
                     modeIndicator
-                    if tempPanelVisible { temperatureChart(height: avail * 0.55, width: geo.size.width) }
-                    if windPanelVisible { precipWindChart(height: avail * 0.36, width: geo.size.width) }
+                    if tempPanelVisible { temperatureChart(height: avail * 0.60, width: geo.size.width) }
+                    if windPanelVisible { precipWindChart(height: avail * 0.40, width: geo.size.width) }
                     if let attribution { WeatherAttributionLink(info: attribution) }
-                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 8)
@@ -316,24 +334,24 @@ struct FoldTimelineView: View {
                     if graphTemp {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Temp", useFahrenheit ? n.temperatureF : n.temperatureC))
-                            .foregroundStyle(chartStyle == .filled ? palette.green : palette.blue)
-                            .symbolSize(120)
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.green : palette.blue,
+                                                      isDaylight: n.isDaylight) }
                     }
                     if graphWetBulb {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Wet", useFahrenheit ? n.wetBulbF : n.wetBulbC))
-                            .foregroundStyle(chartStyle == .filled ? palette.blue : palette.green)
-                            .symbolSize(120)
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.blue : palette.green,
+                                                      isDaylight: n.isDaylight) }
                     }
                     if graphDewPoint {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Dew", useFahrenheit ? n.dewPointF : n.dewPointC))
-                            .foregroundStyle(palette.red).symbolSize(120)
+                            .symbol { NowMarkerSymbol(color: palette.red, isDaylight: n.isDaylight) }
                     }
                     if graphFeels {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Feels", useFahrenheit ? n.apparentTemperatureF : n.apparentTemperatureC))
-                            .foregroundStyle(palette.purple).symbolSize(120)
+                            .symbol { NowMarkerSymbol(color: palette.purple, isDaylight: n.isDaylight) }
                     }
                 }
             }
@@ -414,12 +432,12 @@ struct FoldTimelineView: View {
                     if graphWind {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Wind", useFahrenheit ? n.windSpeedMPH : n.windSpeedKPH))
-                            .foregroundStyle(palette.red).symbolSize(120)
+                            .symbol { NowMarkerSymbol(color: palette.red, isDaylight: n.isDaylight) }
                     }
                     if graphPrecip {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Precip", n.precipProbability * 100))
-                            .foregroundStyle(palette.blue).symbolSize(120)
+                            .symbol { NowMarkerSymbol(color: palette.blue, isDaylight: n.isDaylight) }
                     }
                 }
             }

@@ -13,6 +13,7 @@ struct ContentView: View {
     private let progressTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var showPlaces = false
     @State private var showSettings = false
+    @State private var showInfo = false
     @State private var showWhatsNew = false
     @AppStorage(SettingsKey.lastSeenVersion) private var lastSeenVersion = ""
     @AppStorage(SettingsKey.isUpgradeUser) private var isUpgradeUser = false
@@ -20,7 +21,11 @@ struct ContentView: View {
     @State private var screen: ForecastScreen = .today
     /// Left edge of the visible window, as an offset from "now". Shared by both
     /// graph screens so panning survives a screen switch.
-    @State private var startOffset: TimeInterval = 0
+    ///
+    /// Starts an hour before "now" rather than exactly on it, so the current-time
+    /// markers sit inside the plot instead of being clipped in half by its left
+    /// edge — the same lead-in the filled style used before the graphs scrolled.
+    @State private var startOffset: TimeInterval = -3600
     @State private var panBase: TimeInterval? = nil
     /// Locked once a drag has clearly chosen an axis, so a diagonal swipe
     /// doesn't both pan and switch screens.
@@ -30,6 +35,11 @@ struct ContentView: View {
     @State private var dragY: CGFloat = 0
     /// With the fold timeline on, whether the table is showing instead.
     @State private var foldShowsTable = false
+    /// The moment showing at the top of the table, so switching between the
+    /// table and a graph keeps the same place in time.
+    @State private var tableTopDate: Date? = nil
+    /// Which graph to come back to from the table.
+    @State private var lastGraph: ForecastScreen = .today
 
     private enum DragAxis { case horizontal, vertical }
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
@@ -92,7 +102,7 @@ struct ContentView: View {
                         // edge so it slides in with the finger.
                         if dragY != 0 {
                             screenView(screen.advanced(by: dragY < 0 ? 1 : -1,
-                                                       includeTable: showTable))
+                                                       includeTable: false))
                                 .offset(y: dragY < 0 ? hgt + dragY : -hgt + dragY)
                         }
                         screenView(screen).offset(y: dragY)
@@ -127,6 +137,14 @@ struct ContentView: View {
 
                     Spacer()
 
+                    // About, just left of Settings
+                    Button { showInfo = true } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title3)
+                            .padding(.vertical, 10)
+                    }
+                    .accessibilityLabel("About WetBulbCast")
+
                     // Settings button – bottom-right corner
                     Button { showSettings = true } label: {
                         Image(systemName: "gearshape")
@@ -158,6 +176,9 @@ struct ContentView: View {
                 SettingsView()
             }
             .presentationDetents([.large])
+        }
+        .sheet(isPresented: $showInfo) {
+            NavigationStack { InfoView() }
         }
         // Shown once per version, on the first open after installing/updating.
         .sheet(isPresented: $showWhatsNew) {
@@ -233,7 +254,7 @@ struct ContentView: View {
                     withAnimation(.easeOut(duration: 0.2)) {
                         dragY = dy < 0 ? -size.height : size.height
                     } completion: {
-                        screen = screen.advanced(by: step, includeTable: showTable)
+                        screen = screen.advanced(by: step, includeTable: false)
                         startOffset = clampedOffset(startOffset)
                         dragY = 0
                     }
@@ -283,6 +304,32 @@ struct ContentView: View {
         Divider()
     }
 
+    /// Title with buttons to the screens the user is not on. Gestures alone are
+    /// impractical for reaching a screen now that the graphs scroll ten days.
+    private func headerBar(_ title: String,
+                           left: (String, () -> Void)? = nil,
+                           right: (String, () -> Void)? = nil) -> some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Text(title)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.65)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 78)
+                HStack {
+                    if let left { Button(left.0) { left.1() } }
+                    Spacer()
+                    if let right { Button(right.0) { right.1() } }
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+            }
+            .padding(.vertical, 5)
+            .background(.bar)
+            Divider()
+        }
+    }
+
     private func loadWeather(preserveData: Bool = false, useFreshLocation: Bool = false) async {
         if let place = selectedPlace {
             await weather.loadFor(location: place.clLocation, preserveData: preserveData)
@@ -318,7 +365,9 @@ struct ContentView: View {
 
     private var hereTodayTab: some View {
         VStack(spacing: 0) {
-            tabLabel(windowLabel(.today))
+            headerBar(windowLabel(.today),
+                      left: ("10-day", { goToScreen(.tenDay) }),
+                      right: showTable ? ("table", { goToTable() }) : nil)
             HereTodayView(
                 allSeries: weather.isRefreshing ? [] : panSeries,
                 windowStart: windowStart,
@@ -335,7 +384,9 @@ struct ContentView: View {
 
     private var tenDayTab: some View {
         VStack(spacing: 0) {
-            tabLabel(windowLabel(.tenDay))
+            headerBar(windowLabel(.tenDay),
+                      left: ("24h", { goToScreen(.today) }),
+                      right: showTable ? ("table", { goToTable() }) : nil)
             TenDayView(
                 allSeries: weather.isRefreshing ? [] : panSeries,
                 windowStart: windowStart,
@@ -349,32 +400,41 @@ struct ContentView: View {
         }
     }
 
-    /// The table's header doubles as navigation: reaching a graph by scrolling
-    /// 10 days to an end is impractical, so the graphs get buttons here.
+    /// The table's header doubles as navigation.
     private var tableHeader: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Text(ForecastScreen.table.title)
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                HStack {
-                    if useFoldTimeline {
-                        Button("timeline") {
-                            withAnimation(.easeInOut(duration: 0.25)) { foldShowsTable = false }
-                        }
-                        Spacer()
-                    } else {
-                        Button("24h graph") { goToScreen(.today) }
-                        Spacer()
-                        Button("10-day graph") { goToScreen(.tenDay) }
-                    }
-                }
-                .font(.subheadline)
-                .padding(.horizontal)
-            }
-            .padding(.vertical, 5)
-            .background(.bar)
-            Divider()
+        useFoldTimeline
+            ? headerBar(ForecastScreen.table.title,
+                        left: ("graph", { leaveTable(to: nil) }))
+            : headerBar(ForecastScreen.table.title,
+                        left: ("24h", { leaveTable(to: .today) }),
+                        right: ("10-day", { leaveTable(to: .tenDay) }))
+    }
+
+    /// Entering the table: line it up with the moment the graph is showing.
+    private func goToTable() {
+        tableTopDate = windowStart
+        lastGraph = screen
+        withAnimation(.easeInOut(duration: 0.25)) {
+            if useFoldTimeline { foldShowsTable = true } else { screen = .table }
+        }
+    }
+
+    /// Leaving the table: start the graph at the table's top visible row, so the
+    /// two screens stay on the same moment in time.
+    private func leaveTable(to target: ForecastScreen?) {
+        let dest = target ?? lastGraph
+        if let d = tableTopDate {
+            // Clamp against the span of the screen we are going TO. Using the
+            // table's own ten-day span would pin any future date back to "now",
+            // because a ten-day window cannot start later than that.
+            let span = useFoldTimeline ? ForecastScreen.today.span : dest.span
+            startOffset = TimelineScroll.clampStartOffset(
+                d.timeIntervalSince(nowTick), span: span, now: nowTick,
+                dataLo: weather.seriesFull.first?.date,
+                dataHi: weather.seriesFull.last?.date)
+        }
+        withAnimation(.easeInOut(duration: 0.25)) {
+            if useFoldTimeline { foldShowsTable = false } else { screen = dest }
         }
     }
 
@@ -392,36 +452,25 @@ struct ContentView: View {
                 weatherService: weather,
                 nowTick: nowTick,
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
-                onSwitchScreen: { step in
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        if useFoldTimeline {
-                            foldShowsTable = false      // back to the timeline
-                        } else {
-                            screen = screen.advanced(by: step, includeTable: showTable)
-                            startOffset = clampedOffset(startOffset)
-                        }
-                    }
-                }
+                onSwitchScreen: { _ in leaveTable(to: nil) },
+                topDate: $tableTopDate
             )
         }
     }
 
     private var foldTab: some View {
         VStack(spacing: 0) {
-            tabLabel("timeline · swipe ↔ to scroll, ↕ to zoom")
+            headerBar("graph",
+                      right: showTable ? ("table", { goToTable() }) : nil)
             FoldTimelineView(
                 series: weather.isRefreshing ? [] : panSeries,
+                startOffset: $startOffset,
                 current: weather.isRefreshing ? nil : weather.current,
                 progressLoad: weather.loadProgress,
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
-                onShowTable: {
-                    if showTable {
-                        withAnimation(.easeInOut(duration: 0.25)) { foldShowsTable = true }
-                    }
-                }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
             )
         }
     }

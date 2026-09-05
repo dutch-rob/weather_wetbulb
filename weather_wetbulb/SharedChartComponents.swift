@@ -300,3 +300,22 @@ func dayAxisFitsWeekday(plotWidth: CGFloat, days: Double) -> Bool {
     guard days > 0 else { return true }
     return (plotWidth - 56) / days >= 44
 }
+
+// MARK: - "Now" marker
+
+/// Marker for the current time: a ring in the series colour with a contrasting
+/// centre — white by day, black at night — so it stays legible wherever it
+/// lands, including on top of a saturated filled band where a solid dot of the
+/// same colour disappeared.
+struct NowMarkerSymbol: View {
+    let color: Color
+    let isDaylight: Bool
+
+    var body: some View {
+        ZStack {
+            Circle().fill(isDaylight ? Color.white : Color.black)
+            Circle().strokeBorder(color, lineWidth: 2.5)
+        }
+        .frame(width: 13, height: 13)
+    }
+}

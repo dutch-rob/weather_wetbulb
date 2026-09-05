@@ -49,6 +49,13 @@ struct WatchTodayView: View {
                         tempChart.frame(height: 120)
                         label("Wind / precip")
                         windChart.frame(height: 150)
+                        // Which build this is, at the foot of the scroll so it
+                        // costs nothing above the fold.
+                        Text(BuildInfo.versionAndDate)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 6)
                     }
                 }
                 .padding(.horizontal, 4)

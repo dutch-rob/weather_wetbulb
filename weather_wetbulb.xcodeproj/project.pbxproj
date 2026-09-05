@@ -97,6 +97,7 @@
 		15C0FFEE0000000000000001 /* Exceptions for "weather_wetbulb" folder in "WetBulbCastW Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				BuildInfo.swift,
 				ComplicationSnapshot.swift,
 				Models.swift,
 				psychropy.swift,

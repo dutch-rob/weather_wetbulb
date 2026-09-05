@@ -8,12 +8,24 @@ struct ForecastTableView: View {
     /// screen, +1 = next. The table owns its own scrolling, so it switches
     /// screens on over-scroll rather than on any vertical drag.
     var onSwitchScreen: ((Int) -> Void)? = nil
+    /// The moment showing at the top of the table, shared with the graph
+    /// screens so switching between them keeps the same place in time. Read on
+    /// the way out, written on the way in.
+    @Binding var topDate: Date?
 
     @State private var atTop = true
     @State private var atBottom = false
-    @State private var didScrollToNow = false
+    /// False until the table has been scrolled to the graph's moment. The scroll
+    /// observer fires during the first layout (reporting the top of the content)
+    /// and would otherwise overwrite the very position we are about to restore.
+    @State private var hasAligned = false
 
-    private struct ScrollEdges: Equatable { var top: Bool; var bottom: Bool }
+    private struct ScrollEdges: Equatable {
+        var top: Bool
+        var bottom: Bool
+        /// How far down the content we are, 0…1.
+        var fraction: Double
+    }
     @AppStorage("useFahrenheit") private var useFahrenheit: Bool = true
 
     private static let timeFormatter: DateFormatter = {
@@ -102,6 +114,7 @@ struct ForecastTableView: View {
                                 ForEach(section.points) { point in
                                     dataRow(point)
                                         .background(rowBackground(point))
+                                        .id(point.id)
                                 }
                             } header: {
                                 VStack(spacing: 0) {
@@ -122,14 +135,28 @@ struct ForecastTableView: View {
                         }
                     }
                     .frame(minWidth: totalWidth)
+                    // scrollPosition(id:) only tracks rows when the layout is
+                    // marked as the scroll target.
+                    .scrollTargetLayout()
                 }
                 .onScrollGeometryChange(for: ScrollEdges.self) { g in
-                    ScrollEdges(
+                    let span = max(1, g.contentSize.height - g.containerSize.height)
+                    let f = (g.contentOffset.y + g.contentInsets.top) / span
+                    return ScrollEdges(
                         top: g.contentOffset.y <= g.contentInsets.top + 1,
                         bottom: g.contentOffset.y + g.containerSize.height
-                                >= g.contentSize.height - 1)
+                                >= g.contentSize.height - 1,
+                        fraction: min(1, max(0, f)))
                 } action: { _, v in
                     atTop = v.top; atBottom = v.bottom
+                    guard hasAligned else { return }
+                    // Rows are hourly and evenly spaced, so scroll position maps
+                    // almost linearly onto time — close enough to hand the graph
+                    // the moment the user is looking at. (scrollPosition(id:)
+                    // does not track in a two-axis scroll view.)
+                    if let f = tableSeries.first?.date, let l = tableSeries.last?.date {
+                        topDate = f.addingTimeInterval(v.fraction * l.timeIntervalSince(f))
+                    }
                 }
                 // Only an over-scroll past an end switches screens, so normal
                 // scrolling through the rows is untouched.
@@ -141,10 +168,26 @@ struct ForecastTableView: View {
                             else if v.translation.height > 70 && atTop { onSwitchScreen?(-1) }
                         }
                 )
+                .onDisappear { hasAligned = false }
                 .onAppear {
-                    guard !didScrollToNow, let id = nowRowID else { return }
-                    didScrollToNow = true
-                    proxy.scrollTo(id, anchor: .topLeading)
+                    // Line up with the graph every time the table is opened,
+                    // not just the first time — SwiftUI keeps this view's state
+                    // between visits, so a one-shot guard would only ever work
+                    // once. Falls back to "now" when there is nothing to match.
+                    let target = topDate ?? nowTick
+                    guard let id = nearestForecastPoint(to: target, in: tableSeries)?.id
+                    else { return }
+                    // Two passes: in a LazyVStack the target row may not exist
+                    // yet, and a scrollTo to an unrealised row does nothing. The
+                    // first jump realises the rows around it, the second lands
+                    // on it exactly.
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(id, anchor: .topLeading)
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(id, anchor: .topLeading)
+                            hasAligned = true
+                        }
+                    }
                 }
                 }
             }
@@ -238,5 +281,6 @@ struct ForecastTableView: View {
 }
 
 #Preview {
-    ForecastTableView(weatherService: WeatherService(), nowTick: .now)
+    ForecastTableView(weatherService: WeatherService(), nowTick: .now,
+                      topDate: .constant(nil))
 }

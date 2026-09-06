@@ -28,7 +28,7 @@ Below the graphs are buttons to
 
 ## Reading exact values
 Press and hold a graph to drop a "scrubber": a dashed line at that moment in time, with a card listing the exact values for that hour — temperature and feels like, wet bulb, dew point, wind and gusts, and precipitation.
-Keep holding and drag left or right to move through the forecast; tap the X on the card to dismiss it.
+Keep holding and drag left or right to move through the forecast. Tap anywhere on the graph, or the X on the card, to put it away again.
 
 ## Swiping
 On a graph screen, swiping left or right scrolls the graph through time. The graph starts at the current time; swipe right to go back, up to 10 days into the past, and left to go forward, up to 10 days ahead. Both graph screens share the same position, so the place you scrolled to is still there when you switch screens.

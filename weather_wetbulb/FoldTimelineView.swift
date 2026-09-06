@@ -18,7 +18,6 @@ struct FoldTimelineView: View {
     /// Left edge of the visible window, as an offset from "now". Shared with
     /// ContentView so the table and the graph stay on the same moment; it
     /// starts an hour early so the current-time markers are not clipped by the
-    /// plot edge.
     @Binding var startOffset: TimeInterval
     var current: ForecastPoint? = nil
     var progressLoad: LoadProgress = LoadProgress()
@@ -93,7 +92,12 @@ struct FoldTimelineView: View {
 
     private var visLo: Date { nowTick.addingTimeInterval(clampStart(startOffset)) }
     private var visHi: Date { visLo.addingTimeInterval(span) }
-    private var visDomain: ClosedRange<Date> { visLo...max(visLo.addingTimeInterval(3600), visHi) }
+    private var visDomain: ClosedRange<Date> {
+        // Small proportional lead-in so the "now" rings are not clipped at the
+        // left edge; see HereTodayView.visibleRange.
+        let lo = visLo.addingTimeInterval(-span * 0.03)
+        return lo...max(lo.addingTimeInterval(3600), visHi)
+    }
     private var visSpanHours: Double { visDomain.upperBound.timeIntervalSince(visDomain.lowerBound) / 3600 }
 
     // MARK: - Y ranges
@@ -497,9 +501,9 @@ struct FoldTimelineView: View {
                     }
                     .stroke(axisInk.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 }
-                LongPressLocator { loc, state in
+                LongPressLocator(onEvent: { loc, state in
                     if state == .began || state == .changed { updateScrub(atX: loc.x, proxy: proxy, geo: geo) }
-                }
+                }, onTap: { scrubDate = nil })
             }
         }
     }

@@ -182,6 +182,10 @@ func nearestForecastPoint(to date: Date, in series: [ForecastPoint]) -> Forecast
 struct LongPressLocator: UIViewRepresentable {
     var minimumDuration: Double = 0.3
     var onEvent: (CGPoint, UIGestureRecognizer.State) -> Void
+    /// A plain tap on the chart, used to put the scrubber away. Lives here
+    /// rather than as a SwiftUI .onTapGesture because this view sits on top of
+    /// the chart and would otherwise swallow it.
+    var onTap: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> LocatorView {
         let v = LocatorView()
@@ -192,15 +196,28 @@ struct LongPressLocator: UIViewRepresentable {
         lp.delegate = context.coordinator
         v.addGestureRecognizer(lp)
         v.longPress = lp
+
+        let tap = UITapGestureRecognizer(target: context.coordinator,
+                                         action: #selector(Coordinator.handleTap(_:)))
+        tap.delegate = context.coordinator
+        v.addGestureRecognizer(tap)
         return v
     }
-    func updateUIView(_ v: LocatorView, context: Context) { context.coordinator.onEvent = onEvent }
-    func makeCoordinator() -> Coordinator { Coordinator(onEvent) }
+    func updateUIView(_ v: LocatorView, context: Context) {
+        context.coordinator.onEvent = onEvent
+        context.coordinator.onTap = onTap
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(onEvent, onTap) }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var onEvent: (CGPoint, UIGestureRecognizer.State) -> Void
-        init(_ onEvent: @escaping (CGPoint, UIGestureRecognizer.State) -> Void) { self.onEvent = onEvent }
+        var onTap: (() -> Void)?
+        init(_ onEvent: @escaping (CGPoint, UIGestureRecognizer.State) -> Void,
+             _ onTap: (() -> Void)?) {
+            self.onEvent = onEvent; self.onTap = onTap
+        }
         @objc func handle(_ g: UILongPressGestureRecognizer) { onEvent(g.location(in: g.view), g.state) }
+        @objc func handleTap(_ g: UITapGestureRecognizer) { onTap?() }
     }
 
     /// Hosts the recognizer and, once in the window, makes every ancestor

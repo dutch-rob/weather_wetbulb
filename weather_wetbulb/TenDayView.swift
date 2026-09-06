@@ -25,7 +25,10 @@ struct TenDayView: View {
     /// The window as a range, if scrolling is active.
     private var visibleRange: ClosedRange<Date>? {
         guard let s = windowStart else { return nil }
-        return s...s.addingTimeInterval(windowSpan)
+        // A sliver of lead-in, proportional to the window, so the "now" rings sit
+        // inside the plot instead of being clipped in half by its left edge. A
+        // fixed hour was invisible on the 10-day scale (0.4% of the width).
+        return s.addingTimeInterval(-windowSpan * 0.03)...s.addingTimeInterval(windowSpan)
     }
 
     /// Points inside the window (padded slightly so curves reach both edges).
@@ -124,6 +127,13 @@ struct TenDayView: View {
         return "\(wd) \(day)"
     }
 
+    /// Forecast point closest to "now", drawn as a ring so the current moment
+    /// is obvious. nil when "now" is not in the visible window.
+    private var nowPoint: ForecastPoint? {
+        guard let p = nearestForecastPoint(to: nowTick, in: series) else { return nil }
+        return abs(p.date.timeIntervalSince(nowTick)) <= 3 * 3600 ? p : nil
+    }
+
     // MARK: - Scrubbing
 
     private var scrubPoint: ForecastPoint? {
@@ -174,11 +184,11 @@ struct TenDayView: View {
                 // The long-press is continuous: after it begins it keeps
                 // reporting .changed as the finger moves, so this one gesture
                 // both drops and drags the scrub line.
-                LongPressLocator { loc, state in
+                LongPressLocator(onEvent: { loc, state in
                     if state == .began || state == .changed {
                         updateScrub(atX: loc.x, proxy: proxy, geo: geo)
                     }
-                }
+                }, onTap: { scrubDate = nil })
             }
         }
     }
@@ -286,7 +296,8 @@ struct TenDayView: View {
             ChartLegendRow(entries: filledTempLegend, ink: axisInk)
                 .padding(.leading, 36)
 
-            Chart(series) { p in
+            Chart {
+                ForEach(series) { p in
                 if graphTemp {
                     AreaMark(x: .value("Time", p.date),
                              yStart: .value("base", base),
@@ -314,6 +325,31 @@ struct TenDayView: View {
                              series: .value("S", "app"))
                         .foregroundStyle(palette.purple).interpolationMethod(.linear)
                         .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
+                            }
+                // Rings at the current time, matching the 24-hour and zoom
+                // graphs so "now" is findable on every screen.
+                if let n = nowPoint {
+                    if graphTemp {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Temp", useFahrenheit ? n.temperatureF : n.temperatureC))
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.green : palette.blue) }
+                    }
+                    if graphWetBulb {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Wet Bulb", useFahrenheit ? n.wetBulbF : n.wetBulbC))
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.blue : palette.green) }
+                    }
+                    if graphDewPoint {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Dew Point", useFahrenheit ? n.dewPointF : n.dewPointC))
+                            .symbol { NowMarkerSymbol(color: palette.red) }
+                    }
+                    if graphFeels {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Feels like", useFahrenheit ? n.apparentTemperatureF : n.apparentTemperatureC))
+                            .symbol { NowMarkerSymbol(color: palette.purple) }
+                    }
                 }
             }
             .chartLegend(.hidden)
@@ -357,7 +393,8 @@ struct TenDayView: View {
         let dom = windYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
-            Chart(series) { p in
+            Chart {
+                ForEach(series) { p in
                 let gust = useFahrenheit ? p.windGustMPH : p.windGustKPH
                 let wind = useFahrenheit ? p.windSpeedMPH : p.windSpeedKPH
                 if graphGust {
@@ -390,6 +427,19 @@ struct TenDayView: View {
                              y: .value("Wind", wind), series: .value("S", "windL"))
                         .foregroundStyle(palette.red).interpolationMethod(.linear)
                         .symbol(Circle()).symbolSize(0)
+                }
+                            }
+                if let n = nowPoint {
+                    if graphWind {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Wind", useFahrenheit ? n.windSpeedMPH : n.windSpeedKPH))
+                            .symbol { NowMarkerSymbol(color: palette.red) }
+                    }
+                    if graphPrecip {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Precip %", n.precipProbability * 100))
+                            .symbol { NowMarkerSymbol(color: palette.blue) }
+                    }
                 }
             }
             .chartLegend(.hidden)
@@ -425,7 +475,8 @@ struct TenDayView: View {
             ChartLegendRow(entries: classicTempLegend)
                 .padding(.leading, 8)
 
-            Chart(series) { p in
+            Chart {
+                ForEach(series) { p in
                 if graphTemp {
                     LineMark(x: .value("Time", p.date),
                              y: .value("Temp", useFahrenheit ? p.temperatureF : p.temperatureC),
@@ -450,6 +501,31 @@ struct TenDayView: View {
                              series: .value("S", "D"))
                         .foregroundStyle(palette.purple).interpolationMethod(.linear)
                         .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
+                            }
+                // Rings at the current time, matching the 24-hour and zoom
+                // graphs so "now" is findable on every screen.
+                if let n = nowPoint {
+                    if graphTemp {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Temp", useFahrenheit ? n.temperatureF : n.temperatureC))
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.green : palette.blue) }
+                    }
+                    if graphWetBulb {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Wet Bulb", useFahrenheit ? n.wetBulbF : n.wetBulbC))
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.blue : palette.green) }
+                    }
+                    if graphDewPoint {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Dew Point", useFahrenheit ? n.dewPointF : n.dewPointC))
+                            .symbol { NowMarkerSymbol(color: palette.red) }
+                    }
+                    if graphFeels {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Feels like", useFahrenheit ? n.apparentTemperatureF : n.apparentTemperatureC))
+                            .symbol { NowMarkerSymbol(color: palette.purple) }
+                    }
                 }
             }
             .chartLegend(.hidden)
@@ -483,7 +559,8 @@ struct TenDayView: View {
             ChartLegendRow(entries: classicWindLegend)
                 .padding(.leading, 8)
 
-            Chart(series) { p in
+            Chart {
+                ForEach(series) { p in
                 if graphPrecip {
                     AreaMark(x: .value("Time", p.date),
                              y: .value("Precip %", p.precipProbability * 100))
@@ -503,6 +580,19 @@ struct TenDayView: View {
                              series: .value("S", "wind"))
                         .foregroundStyle(palette.red).interpolationMethod(.linear)
                         .symbol(Circle()).symbolSize(0)
+                }
+                            }
+                if let n = nowPoint {
+                    if graphWind {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Wind", useFahrenheit ? n.windSpeedMPH : n.windSpeedKPH))
+                            .symbol { NowMarkerSymbol(color: palette.red) }
+                    }
+                    if graphPrecip {
+                        PointMark(x: .value("Time", n.date),
+                                  y: .value("Precip %", n.precipProbability * 100))
+                            .symbol { NowMarkerSymbol(color: palette.blue) }
+                    }
                 }
             }
             .chartLegend(.hidden)

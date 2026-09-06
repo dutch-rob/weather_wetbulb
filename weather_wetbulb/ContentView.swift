@@ -22,10 +22,7 @@ struct ContentView: View {
     /// Left edge of the visible window, as an offset from "now". Shared by both
     /// graph screens so panning survives a screen switch.
     ///
-    /// Starts an hour before "now" rather than exactly on it, so the current-time
-    /// markers sit inside the plot instead of being clipped in half by its left
-    /// edge — the same lead-in the filled style used before the graphs scrolled.
-    @State private var startOffset: TimeInterval = -3600
+    @State private var startOffset: TimeInterval = 0
     @State private var panBase: TimeInterval? = nil
     /// Locked once a drag has clearly chosen an axis, so a diagonal swipe
     /// doesn't both pan and switch screens.

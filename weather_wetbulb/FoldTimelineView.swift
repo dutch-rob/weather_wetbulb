@@ -334,24 +334,22 @@ struct FoldTimelineView: View {
                     if graphTemp {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Temp", useFahrenheit ? n.temperatureF : n.temperatureC))
-                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.green : palette.blue,
-                                                      isDaylight: n.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.green : palette.blue) }
                     }
                     if graphWetBulb {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Wet", useFahrenheit ? n.wetBulbF : n.wetBulbC))
-                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.blue : palette.green,
-                                                      isDaylight: n.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: chartStyle == .filled ? palette.blue : palette.green) }
                     }
                     if graphDewPoint {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Dew", useFahrenheit ? n.dewPointF : n.dewPointC))
-                            .symbol { NowMarkerSymbol(color: palette.red, isDaylight: n.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.red) }
                     }
                     if graphFeels {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Feels", useFahrenheit ? n.apparentTemperatureF : n.apparentTemperatureC))
-                            .symbol { NowMarkerSymbol(color: palette.purple, isDaylight: n.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.purple) }
                     }
                 }
             }
@@ -432,12 +430,12 @@ struct FoldTimelineView: View {
                     if graphWind {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Wind", useFahrenheit ? n.windSpeedMPH : n.windSpeedKPH))
-                            .symbol { NowMarkerSymbol(color: palette.red, isDaylight: n.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.red) }
                     }
                     if graphPrecip {
                         PointMark(x: .value("Time", n.date),
                                   y: .value("Precip", n.precipProbability * 100))
-                            .symbol { NowMarkerSymbol(color: palette.blue, isDaylight: n.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.blue) }
                     }
                 }
             }

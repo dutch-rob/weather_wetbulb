@@ -18,26 +18,28 @@ The app reads the past 10 days of weather as well as the forecast, so you can sc
 The top graph shows temperature, wet-bulb temperature and dew point, plus the "feels like" temperature reported by Apple Weather.
 The bottom graph shows wind speed, gusts and chance of precipitation.
 Ringed dots mark the current time on both graphs, hollow so the page shows through, so "now" stays easy to find however far you have scrolled or zoomed.
-Above the graphs, the current place is listed — tap it to switch places.
+At the top of the screen the current place is listed — tap it to switch places — with a refresh button beside it that reloads your location and forecast.
 Below the graphs are buttons to
-  - Switch between Celsius and Fahrenheit
-  - Switch to another place
-  - Open Settings (the cog wheel), which also holds the About screen with this info
-  - Refresh the forecast (the circular arrow, top right)
-  - Open this info screen (the "i" button, next to the cog wheel)
+  - Switch between Celsius and Fahrenheit (bottom left)
+  - Switch to another place ("Places", middle)
+  - Open this info screen (the "i" button)
+  - Open Settings (the cog wheel, bottom right)
 
 ## Reading exact values
 Press and hold a graph to drop a "scrubber": a dashed line at that moment in time, with a card listing the exact values for that hour — temperature and feels like, wet bulb, dew point, wind and gusts, and precipitation.
 Keep holding and drag left or right to move through the forecast. Tap anywhere on the graph, or the X on the card, to put it away again.
 
 ## Swiping
-On a graph screen, swiping left or right scrolls the graph through time. The graph starts at the current time; swipe right to go back, up to 10 days into the past, and left to go forward, up to 10 days ahead. Both graph screens share the same position, so the place you scrolled to is still there when you switch screens.
+On a graph screen, swiping left or right scrolls the graph through time. The graph starts at the current time; swipe right to go back, up to 10 days into the past, and left to go forward through the forecast. Scrolling stops where the data does, so the 24 hour screen reaches about 10 days ahead while the 10 day screen, already showing all of it, only scrolls back. Both graph screens share the same position, so the place you scrolled to is still there when you switch screens.
 
 Swiping up or down switches between the two graph screens, and the screen follows your finger so you can see where you are heading before you let go.
 
 Every screen has a button at each side of its title for the two screens you are not on, which is the quickest way to the table and back. Switching between a graph and the table keeps your place in time: the graph starts at whatever hour is at the top of the table, and the table opens at whatever the graph is showing.
 
 To reload your location and forecast, use the refresh button next to the place name at the top.
+
+## Table screen
+The table lists every hour as a row: time, a weather symbol, UV index, temperature and feels like, wet bulb, dew point, wind, chance of precipitation and cloud cover. It covers the same ten days back and ten days ahead as the graphs, opens at the current hour, and scrolls sideways for the columns that do not fit.
 
 ## Places screen
 The places screen lets you choose another place for which to show forecasts.
@@ -57,7 +59,7 @@ The cog wheel at the bottom right opens Settings, where you can adjust:
   - Zoom graph: see below
 
 ## Zoom graph (experimental)
-Instead of paging between a 24-hour screen and a 10-day screen, the zoom graph puts both on one screen. Swipe left or right to scroll through time, and pinch to zoom: from a single day out to ten days, stopping at any zoom level in between. The heading tells you how wide the window is and where it starts. A button at the top switches to the table, and the scrubber works here too.
+Instead of paging between a 24-hour screen and a 10-day screen, the zoom graph puts both on one screen. Swipe left or right to scroll through time, and pinch to zoom: from a single day out to ten days, stopping at any zoom level in between. The heading tells you how wide the window is and where it starts. A button at the top switches to the table — there is no up/down swipe here, since pinching does the zooming — and the scrubber works here too.
 
 ## Apple Watch
 WetBulbCast includes an Apple Watch app that fetches its own forecast, so it works without your phone nearby. Swipe between a table, a 24-hour screen and a 10-day screen. It follows the units and chart style you picked on the phone, and your places are sent across from the phone.
@@ -65,6 +67,8 @@ WetBulbCast includes an Apple Watch app that fetches its own forecast, so it wor
 Two watch-face complications are available — a corner one and a circular one. Both show the current wet-bulb temperature, ringed by a gauge covering the day's wet-bulb range, colored from cool to dangerously humid.
 
 ## Notes
+
+The version and build date of the copy you are running are shown at the bottom of this screen, and on the watch below its graphs.
 
 1. This app is free and open source. You can find the open source of the app on GitHub:
    https://github.com/dutch-rob/weather_wetbulb

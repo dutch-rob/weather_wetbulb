@@ -88,7 +88,7 @@ struct SettingsView: View {
                 // table: fold mode no longer has to hide it.
                 Toggle("Zoom graph", isOn: $useFoldTimeline)
             } header: {
-                Text("Experimental")
+                Text("Zoom graph")
             } footer: {
                 Text("Replaces the paged 24-hour and 10-day screens with one graph you zoom: swipe left/right to scroll through time, and pinch to zoom — from a single day out to ten days, stopping wherever you like. Buttons at the top switch to the table, and long-press a chart to read exact values.")
             }

@@ -58,7 +58,7 @@ The cog wheel at the bottom right opens Settings, where you can adjust:
   - Table screen: turn the table off if you only want the two graph screens
   - Zoom graph: see below
 
-## Zoom graph (experimental)
+## Zoom graph
 Instead of paging between a 24-hour screen and a 10-day screen, the zoom graph puts both on one screen. Swipe left or right to scroll through time, and pinch to zoom: from a single day out to ten days, stopping at any zoom level in between. The heading tells you how wide the window is and where it starts. A button at the top switches to the table — there is no up/down swipe here, since pinching does the zooming — and the scrubber works here too.
 
 ## Apple Watch

@@ -19,6 +19,10 @@ enum SettingsKey {
     static let syncAcrossDevices = "syncAcrossDevices"
     /// App version whose what's-new sheet has been shown ("" = never shown).
     static let lastSeenVersion = "lastSeenVersion"
+    /// Build stamp of the copy whose what's-new sheet has been shown. Only
+    /// consulted in development builds, where the version number rarely changes
+    /// between installs.
+    static let lastSeenBuild   = "lastSeenBuild"
     /// True when this install already had an earlier version of the app, so the
     /// what's-new sheet greets an upgrader rather than a first-time user.
     /// Decided once, on the first launch after updating/installing.

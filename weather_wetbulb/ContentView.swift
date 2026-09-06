@@ -17,6 +17,12 @@ struct ContentView: View {
     @State private var showWhatsNew = false
     @AppStorage(SettingsKey.lastSeenVersion) private var lastSeenVersion = ""
     @AppStorage(SettingsKey.isUpgradeUser) private var isUpgradeUser = false
+    @AppStorage(SettingsKey.lastSeenBuild) private var lastSeenBuild = ""
+
+    /// The build currently running, identified by when it was linked.
+    private var buildStamp: String {
+        BuildInfo.date.map { String(Int($0.timeIntervalSince1970)) } ?? ""
+    }
     /// Which screen is showing (vertical swipe walks these).
     @State private var screen: ForecastScreen = .today
     /// Left edge of the visible window, as an offset from "now". Shared by both
@@ -183,6 +189,7 @@ struct ContentView: View {
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView(isUpgrade: isUpgradeUser) {
                 lastSeenVersion = appVersionString
+                lastSeenBuild = buildStamp
                 showWhatsNew = false
             }
             .interactiveDismissDisabled()
@@ -216,7 +223,14 @@ struct ContentView: View {
         .onChange(of: chartStyleRaw) { _, _ in pushToWatch() }
         .onChange(of: places.places) { _, _ in pushToWatch() }
         .task {
-            if lastSeenVersion != appVersionString { showWhatsNew = true }
+            // Released builds: once per version. Development builds also show it
+            // after every install from Xcode, where the version number rarely
+            // changes between builds — the executable's link time does.
+            var show = lastSeenVersion != appVersionString
+            #if DEBUG
+            if !buildStamp.isEmpty && lastSeenBuild != buildStamp { show = true }
+            #endif
+            if show { showWhatsNew = true }
             PhoneWatchSync.shared.start()
             pushToWatch()
             if indoorTracking {

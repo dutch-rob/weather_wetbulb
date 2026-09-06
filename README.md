@@ -17,7 +17,7 @@ WetBulbCast starts on the screen showing 24 hour weather forecast graphs for you
 The app reads the past 10 days of weather as well as the forecast, so you can scroll back to see what the weather actually did.
 The top graph shows temperature, wet-bulb temperature and dew point, plus the "feels like" temperature reported by Apple Weather.
 The bottom graph shows wind speed, gusts and chance of precipitation.
-Ringed dots mark the current time on both graphs — light-centred by day and dark-centred at night — so "now" stays easy to find however far you have scrolled or zoomed.
+Ringed dots mark the current time on both graphs, hollow so the page shows through, so "now" stays easy to find however far you have scrolled or zoomed.
 Above the graphs, the current place is listed — tap it to switch places.
 Below the graphs are buttons to
   - Switch between Celsius and Fahrenheit

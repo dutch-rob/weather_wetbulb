@@ -321,22 +321,22 @@ struct HereTodayView: View {
                     if graphTemp {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Temp", useFahrenheit ? c.temperatureF : c.temperatureC))
-                            .symbol { NowMarkerSymbol(color: palette.green, isDaylight: c.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.green) }
                     }
                     if graphWetBulb {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Wet Bulb", useFahrenheit ? c.wetBulbF : c.wetBulbC))
-                            .symbol { NowMarkerSymbol(color: palette.blue, isDaylight: c.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.blue) }
                     }
                     if graphDewPoint {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Dew Point", useFahrenheit ? c.dewPointF : c.dewPointC))
-                            .symbol { NowMarkerSymbol(color: palette.red, isDaylight: c.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.red) }
                     }
                     if graphFeels {
                         PointMark(x: .value("Time", c.date),
                                   y: .value("Feels like", useFahrenheit ? c.apparentTemperatureF : c.apparentTemperatureC))
-                            .symbol { NowMarkerSymbol(color: palette.purple, isDaylight: c.isDaylight) }
+                            .symbol { NowMarkerSymbol(color: palette.purple) }
                     }
                 }
             }

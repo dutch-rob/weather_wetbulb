@@ -27,7 +27,7 @@ struct InfoView: View {
 
                 Group {
                     Text("Reading exact values").font(.headline)
-                    Text("Press and hold a graph to drop a \"scrubber\": a dashed line at that moment in time, with a card listing the exact values for that hour — temperature and feels like, wet bulb, dew point, wind and gusts, and precipitation. Keep holding and drag left or right to move through the forecast; tap the X on the card to dismiss it.")
+                    Text("Press and hold a graph to drop a \"scrubber\": a dashed line at that moment in time, with a card listing the exact values for that hour — temperature and feels like, wet bulb, dew point, wind and gusts, and precipitation. Keep holding and drag left or right to move through the forecast. Tap anywhere on the graph, or the X on the card, to put it away again.")
                 }
 
                 Group {

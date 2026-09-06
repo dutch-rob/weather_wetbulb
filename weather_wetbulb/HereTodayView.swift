@@ -25,7 +25,10 @@ struct HereTodayView: View {
     /// The window as a range, if scrolling is active.
     private var visibleRange: ClosedRange<Date>? {
         guard let s = windowStart else { return nil }
-        return s...s.addingTimeInterval(windowSpan)
+        // A sliver of lead-in, proportional to the window, so the "now" rings sit
+        // inside the plot instead of being clipped in half by its left edge. A
+        // fixed hour was invisible on the 10-day scale (0.4% of the width).
+        return s.addingTimeInterval(-windowSpan * 0.03)...s.addingTimeInterval(windowSpan)
     }
 
     /// Points inside the window (padded slightly so curves reach both edges).
@@ -169,11 +172,11 @@ struct HereTodayView: View {
                 // The long-press is continuous: after it begins it keeps
                 // reporting .changed as the finger moves, so this one gesture
                 // both drops and drags the scrub line.
-                LongPressLocator { loc, state in
+                LongPressLocator(onEvent: { loc, state in
                     if state == .began || state == .changed {
                         updateScrub(atX: loc.x, proxy: proxy, geo: geo)
                     }
-                }
+                }, onTap: { scrubDate = nil })
             }
         }
     }

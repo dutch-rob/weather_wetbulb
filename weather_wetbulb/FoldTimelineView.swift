@@ -2,7 +2,7 @@
 //  FoldTimelineView.swift
 //  weather_wetbulb
 //
-//  Optional "fold timeline" (Settings → Experimental). Instead of paging
+//  Optional "zoom graph" (Settings → Zoom graph). Instead of paging
 //  between a 24-hour screen and a 10-day screen, one continuous timeline morphs
 //  between them: a horizontal swipe drives a progress value 0…1 and the
 //  temperature + precip/wind charts zoom their x-axis from a single day out to

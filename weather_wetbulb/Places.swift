@@ -12,16 +12,23 @@ struct Place: Identifiable, Equatable, Codable {
     var latitude: Double
     var longitude: Double
     var altitude: Double   // metres above sea level; 0 when unknown
+    /// True when this place has an indoor sensor feed and should carry the
+    /// indoor comfort model. Off everywhere by default; the feed itself is
+    /// matched separately (see `IndoorFeedSource`).
+    var indoorMonitoring: Bool
 
-    init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double, altitude: Double = 0) {
+    init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double,
+         altitude: Double = 0, indoorMonitoring: Bool = false) {
         self.id = id
         self.name = name
         self.latitude = latitude
         self.longitude = longitude
         self.altitude = altitude
+        self.indoorMonitoring = indoorMonitoring
     }
 
-    // Backward-compatible decode: altitude was added later; treat missing key as 0.
+    // Backward-compatible decode: altitude and indoorMonitoring were added
+    // later; treat missing keys as 0 / false.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id        = try c.decode(UUID.self,   forKey: .id)
@@ -29,6 +36,7 @@ struct Place: Identifiable, Equatable, Codable {
         latitude  = try c.decode(Double.self, forKey: .latitude)
         longitude = try c.decode(Double.self, forKey: .longitude)
         altitude  = try c.decodeIfPresent(Double.self, forKey: .altitude) ?? 0
+        indoorMonitoring = try c.decodeIfPresent(Bool.self, forKey: .indoorMonitoring) ?? false
     }
 
     var coordinate: CLLocationCoordinate2D {

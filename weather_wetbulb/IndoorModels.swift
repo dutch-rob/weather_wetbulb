@@ -27,14 +27,16 @@ enum IndoorStore {
         let syncOn = UserDefaults.standard.bool(forKey: SettingsKey.syncAcrossDevices)
         let config = ModelConfiguration(cloudKitDatabase: syncOn ? .automatic : .none)
         if let container = try? ModelContainer(
-            for: ComfortSample.self, CoolerEvent.self, HVACEvent.self, configurations: config) {
+            for: ComfortSample.self, CoolerEvent.self, HVACEvent.self,
+                IndoorReading.self, configurations: config) {
             return container
         }
         // Fall back to a local store so the app still launches if CloudKit
         // setup fails (misconfiguration, unavailable).
         let local = ModelConfiguration(cloudKitDatabase: .none)
         return try! ModelContainer(
-            for: ComfortSample.self, CoolerEvent.self, HVACEvent.self, configurations: local)
+            for: ComfortSample.self, CoolerEvent.self, HVACEvent.self,
+            IndoorReading.self, configurations: local)
     }()
 }
 

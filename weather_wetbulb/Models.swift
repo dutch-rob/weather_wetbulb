@@ -36,6 +36,9 @@ struct ForecastPoint: Identifiable, Codable {
     let windSpeedKPH: Double
     let windGustMPH: Double
     let windGustKPH: Double
+    /// Direction the wind blows FROM, in degrees clockwise from north.
+    /// Optional so payloads encoded before this field decode unchanged.
+    var windDirectionDegrees: Double? = nil
     let cloudCover: Double          // 0…1
     let cloudCoverLow: Double       // 0…1
     let cloudCoverMedium: Double    // 0…1

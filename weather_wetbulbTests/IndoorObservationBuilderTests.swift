@@ -43,6 +43,7 @@ struct IndoorObservationBuilderTests {
                          windKPH: Double = 7.2,
                          gustKPH: Double = 14.4,
                          precipMM: Double = 0,
+                         directionDeg: Double? = 180,
                          pressurePa: Double = 89_000) -> ForecastPoint {
         ForecastPoint(kind: .historic,
                       date: t0.addingTimeInterval(m * 60),
@@ -61,6 +62,7 @@ struct IndoorObservationBuilderTests {
                       windSpeedKPH: windKPH,
                       windGustMPH: gustKPH / 1.609,
                       windGustKPH: gustKPH,
+                      windDirectionDegrees: directionDeg,
                       cloudCover: cloud,
                       cloudCoverLow: cloud, cloudCoverMedium: 0, cloudCoverHigh: 0,
                       humidity: humidity,
@@ -179,8 +181,9 @@ struct IndoorObservationBuilderTests {
         #expect(abs(v.windGustMS! - 20) < 0.001)
         // Pascals to hectopascals.
         #expect(abs(v.stationPressureHPa! - 890) < 0.001)
-        // WeatherKit has no wind direction at all.
-        #expect(v.windDirectionDeg == nil)
+        // Wind direction now comes through from WeatherKit too.
+        #expect(v.windDirectionDeg != nil)
+        #expect(abs(v.windDirectionDeg! - 180) < 0.001)
     }
 
     @Test func timesOutsideTheSeriesClampToTheNearestPoint() {
@@ -203,6 +206,32 @@ struct IndoorObservationBuilderTests {
         #expect(built.count == 1)
         #expect(built.first!.weatherKit.temperatureC == nil)
         #expect(built.first!.station.temperatureC != nil)
+    }
+
+    @Test func windDirectionInterpolatesAcrossNorth() {
+        // 350 then 10 degrees: the midpoint is north (0/360), NOT 180.
+        let series = [Self.forecast(minutesFromStart: 0, tempC: 10, directionDeg: 350),
+                      Self.forecast(minutesFromStart: 60, tempC: 10, directionDeg: 10)]
+        let mid = Self.t0.addingTimeInterval(30 * 60)
+        let v = IndoorObservationBuilder.weatherKitValues(at: mid, in: series).values
+        #expect(v.windDirectionDeg != nil)
+        let d = v.windDirectionDeg!
+        let distanceFromNorth = min(d, 360 - d)
+        #expect(distanceFromNorth < 0.001)
+    }
+
+    @Test func windDirectionInterpolatesNormallyAwayFromTheSeam() {
+        let series = [Self.forecast(minutesFromStart: 0, tempC: 10, directionDeg: 90),
+                      Self.forecast(minutesFromStart: 60, tempC: 10, directionDeg: 180)]
+        let mid = Self.t0.addingTimeInterval(30 * 60)
+        let v = IndoorObservationBuilder.weatherKitValues(at: mid, in: series).values
+        #expect(abs(v.windDirectionDeg! - 135) < 0.001)
+    }
+
+    @Test func windDirectionSurvivesAMissingEndpoint() {
+        #expect(IndoorObservationBuilder.lerpAngle(nil, 90, 0.5) == 90)
+        #expect(IndoorObservationBuilder.lerpAngle(90, nil, 0.5) == 90)
+        #expect(IndoorObservationBuilder.lerpAngle(nil, nil, 0.5) == nil)
     }
 
     // MARK: - Solar

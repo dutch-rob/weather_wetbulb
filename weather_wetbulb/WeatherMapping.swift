@@ -92,6 +92,7 @@ enum WeatherMapping {
                 windSpeedKPH:         windKPH,
                 windGustMPH:          gustMPH,
                 windGustKPH:          gustKPH,
+                windDirectionDegrees: h.wind.direction.converted(to: .degrees).value,
                 cloudCover:           h.cloudCover,
                 cloudCoverLow:        cloudLow,
                 cloudCoverMedium:     cloudMid,
@@ -141,6 +142,7 @@ enum WeatherMapping {
             windSpeedKPH:         windKPH,
             windGustMPH:          gustMPH,
             windGustKPH:          gustKPH,
+            windDirectionDegrees: c.wind.direction.converted(to: .degrees).value,
             cloudCover:           c.cloudCover,
             cloudCoverLow:        0,      // not provided by CurrentWeather
             cloudCoverMedium:     0,      // not provided by CurrentWeather

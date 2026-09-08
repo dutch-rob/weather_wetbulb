@@ -234,7 +234,6 @@ struct ContentView: View {
             PhoneWatchSync.shared.start()
             pushToWatch()
             if indoorTracking {
-                HomeKitService.shared.start()                       // begin discovery early
                 IndoorSamplingCoordinator.shared.scheduleBackgroundSample()
                 await IndoorSamplingCoordinator.shared.sampleIfDue()
             }

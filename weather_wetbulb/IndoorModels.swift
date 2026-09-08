@@ -3,7 +3,7 @@
 //  weather_wetbulb
 //
 //  SwiftData schema for the indoor-comfort / evaporative-cooler feature
-//  (Phase 1: data collection). Each ComfortSample pairs an indoor HomeKit
+//  (Phase 1: data collection). Each ComfortSample pairs an indoor
 //  reading with the concurrent outdoor WeatherKit conditions, so later phases
 //  can fit a regression of indoor temperature/humidity on recent outdoor
 //  weather — no schema migration needed (lag features are computed at fit time
@@ -44,7 +44,7 @@ enum IndoorStore {
 final class ComfortSample {
     var date: Date = Date()
 
-    // MARK: Indoor (HomeKit, aggregated over the user's selected sensors)
+    // MARK: Indoor (legacy: aggregated sensor readings, no longer written)
     var indoorTempC: Double?
     var indoorHumidity: Double?          // 0…1
     var indoorSensorCount: Int = 0
@@ -98,20 +98,25 @@ final class CoolerEvent {
     }
 }
 
-/// A manually-logged thermostat (heater/AC) state, for homes whose thermostat
-/// isn't in HomeKit (e.g. a Nest). Used as the HVAC covariate when no HomeKit
-/// climate reading is available, so the model can separate AC/heat effects from
-/// the evaporative cooler. Mode: 0 off/idle, 1 heating, 2 cooling.
+/// A thermostat (heater/AC) state change. Used as the HVAC covariate so the
+/// model can separate AC and heat effects from the evaporative cooler.
+/// Mode: 0 off/idle, 1 heating, 2 cooling.
 @Model
 final class HVACEvent {
     var date: Date = Date()
     var mode: Int = 0
-    /// 0 = manual, 1 = inferred (future).
+    /// Setpoint the thermostat was moved to, when known. Changing the setpoint
+    /// is itself an event worth recording: it changes how hard the system works
+    /// without changing the mode, so a model that ignores it sees an
+    /// unexplained shift in the cooling rate.
+    var targetTempC: Double?
+    /// 0 = manual, 1 = inferred and confirmed by the user.
     var source: Int = 0
 
-    init(date: Date = Date(), mode: Int, source: Int = 0) {
+    init(date: Date = Date(), mode: Int, targetTempC: Double? = nil, source: Int = 0) {
         self.date = date
         self.mode = mode
+        self.targetTempC = targetTempC
         self.source = source
     }
 }

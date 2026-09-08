@@ -41,9 +41,10 @@ struct weather_wetbulbApp: App {
             ContentView()
         }
         .modelContainer(IndoorStore.container)
-        // Best-effort periodic indoor sampling in the background. iOS grants
-        // these opportunistically (and HomeKit reads are only reliable in the
-        // foreground), so the dataset is foreground-biased — see the sampler.
+        // Best-effort background ingest of the station feed. iOS grants these
+        // opportunistically, but that no longer biases the data: the station
+        // records on its own cadence regardless, so a missed refresh only
+        // delays when rows are filed, never loses them.
         .backgroundTask(.appRefresh(BGTask.indoorSample)) {
             await IndoorSamplingCoordinator.shared.runBackgroundSample()
         }

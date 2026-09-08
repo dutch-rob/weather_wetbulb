@@ -28,9 +28,13 @@ enum SettingsKey {
     /// Decided once, on the first launch after updating/installing.
     static let isUpgradeUser   = "isUpgradeUser"
 
-    // Indoor-comfort (HomeKit) feature
+    // Indoor-comfort feature (station feed)
     static let indoorTrackingEnabled = "indoorTrackingEnabled"
-    static let indoorSensorIDs        = "indoorSensorIDs_v1"   // JSON [String] of selected characteristic UUIDs
+    // Where the station is, remembered so the app can tell whether the
+    // current location is close enough to show that home's indoor screen.
+    static let indoorHomeLatitude     = "indoorHomeLatitude"
+    static let indoorHomeLongitude    = "indoorHomeLongitude"
+    static let indoorHomeAltitude     = "indoorHomeAltitude"
     static let homeLat                = "homeLat_v1"
     static let homeLon                = "homeLon_v1"
     static let homeAlt                = "homeAlt_v1"

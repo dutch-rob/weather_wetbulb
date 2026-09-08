@@ -102,8 +102,6 @@ struct SettingsView: View {
                 Text("When on, your indoor-comfort data syncs across your own devices signed into the same iCloud account. Off by default. Changing it takes effect after you quit and reopen the app.")
             }
 
-            IndoorSettingsSection()
-
             Section {
                 NavigationLink {
                     InfoView()

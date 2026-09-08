@@ -234,6 +234,41 @@ struct IndoorObservationBuilderTests {
         #expect(IndoorObservationBuilder.lerpAngle(nil, nil, 0.5) == nil)
     }
 
+    // MARK: - Rainfall
+
+    @Test func rainfallBecomesTheIncrementAcrossTheInterval() {
+        // The station counter is cumulative; what the model needs is the rain
+        // that fell during this interval, not the running total.
+        let a = Self.reading(minutesFromStart: 0)
+        let b = Self.reading(minutesFromStart: 18)
+        a.rainfallMM = 12.0
+        b.rainfallMM = 12.8              // one bucket tip
+        let increment = IndoorObservationBuilder.rainIncrement(from: a, to: b)
+        #expect(increment != nil)
+        #expect(abs(increment! - 0.8) < 0.001)
+    }
+
+    @Test func aCounterResetDoesNotReadAsNegativeRain() {
+        let a = Self.reading(minutesFromStart: 0)
+        let b = Self.reading(minutesFromStart: 18)
+        a.rainfallMM = 40.0
+        b.rainfallMM = 0.0               // console reset its total
+        #expect(IndoorObservationBuilder.rainIncrement(from: a, to: b) == 0)
+    }
+
+    @Test func weatherKitRainIsScaledToTheIntervalLength() {
+        // WeatherKit gives an hourly amount; an 18-minute interval gets 0.3 of it.
+        let readings = [Self.reading(minutesFromStart: 0),
+                        Self.reading(minutesFromStart: 18, indoorC: 22.4)]
+        let weather = [Self.forecast(minutesFromStart: 0, tempC: 18, precipMM: 10),
+                       Self.forecast(minutesFromStart: 60, tempC: 18, precipMM: 10)]
+        let built = IndoorObservationBuilder.build(readings: readings, weather: weather)
+        #expect(built.count == 1)
+        let rain = built.first!.weatherKit.rainfallMM
+        #expect(rain != nil)
+        #expect(abs(rain! - 3.0) < 0.001)
+    }
+
     // MARK: - Solar
 
     @Test func solarPrefersTheStationLightSensor() {

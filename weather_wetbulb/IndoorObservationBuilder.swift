@@ -74,7 +74,18 @@ enum IndoorObservationBuilder {
             // A state change inside the interval makes both labels wrong.
             guard !timeline.hasTransition(between: a.date, and: b.date) else { continue }
 
-            let wk = weatherKitValues(at: a.date, in: series)
+            var wk = weatherKitValues(at: a.date, in: series)
+            // WeatherKit reports an hourly amount, so scale it to this interval.
+            if let hourly = wk.values.rainfallMM {
+                wk.values.rainfallMM = hourly * dt / 3600
+            }
+            var stationOut = stationValues(a)
+            // The station's counter is cumulative, so the rain that fell during
+            // this interval is the increase across it. Clamped at zero because
+            // the console resets the counter, which would otherwise show as a
+            // large negative downpour.
+            stationOut.rainfallMM = rainIncrement(from: a, to: b)
+
             out.append(IndoorObservation(
                 date: a.date,
                 dt: dt,
@@ -83,11 +94,17 @@ enum IndoorObservationBuilder {
                 nextIndoorTempC: tB,
                 nextIndoorDewPointC: dB,
                 weatherKit: wk.values,
-                station: stationValues(a),
+                station: stationOut,
                 solar: solar(station: a, weatherKit: wk.point),
                 hvac: timeline.state(at: a.date)))
         }
         return out
+    }
+
+    /// Rain that fell between two readings, from the cumulative counter.
+    static func rainIncrement(from a: IndoorReading, to b: IndoorReading) -> Double? {
+        guard let start = a.rainfallMM, let end = b.rainfallMM else { return nil }
+        return max(0, end - start)
     }
 
     // MARK: - Sources

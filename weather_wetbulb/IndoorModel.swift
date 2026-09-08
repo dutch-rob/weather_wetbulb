@@ -22,21 +22,28 @@
 //    dT_in/dt = a0
 //             + a1 (T_out - T_in)              conduction through the envelope
 //             + a2 solar                       solar gain
-//             + a3 wind (T_out - T_in)         wind-driven infiltration
-//             + a4 cooler (WB_out - T_in)      evaporative cooling pulls the
+//             + [infiltration terms] x (T_out - T_in)
+//             + a7 rain                        wet walls lose heat evaporatively
+//             + a8 cooler (WB_out - T_in)      evaporative cooling pulls the
 //                                              indoor temperature toward the
 //                                              outdoor WET-BULB, its floor
-//             + a5 ac                          compressor removes heat
-//             + a6 heat                        burner adds heat
+//             + a9 ac                          compressor removes heat
+//             + a10 heat                       burner adds heat
 //
 //    dD_in/dt = b0
 //             + b1 (D_out - D_in)              moisture exchange with outside
-//             + b2 cooler (WB_out - D_in)      the cooler adds moisture, so the
+//             + [infiltration terms] x (D_out - D_in)
+//             + b6 rain
+//             + b7 cooler (WB_out - D_in)      the cooler adds moisture, so the
 //                                              indoor dew point climbs toward
 //                                              the outdoor wet-bulb
-//             + b3 ac                          the coil condenses water out
-//             + b4 heat                        expected ~0: heating moves
+//             + b8 ac                          the coil condenses water out
+//             + b9 heat                        expected ~0: heating moves
 //                                              temperature, not moisture
+//
+//  The infiltration terms are wind, gust-excess, and wind x sin/cos of the wind
+//  direction, each multiplied by the driving gradient. See InfiltrationTerms
+//  for why direction is encoded as a sine/cosine pair rather than as degrees.
 //
 //  Fit quality is always measured on a held-out *later* slice, never in-sample.
 //  Source selection swaps variables in and out looking for improvement, and
@@ -118,6 +125,11 @@ struct OutdoorValues: Sendable, Equatable {
     var windSpeedMS: Double?
     var windGustMS: Double?
     var windDirectionDeg: Double?
+    /// Millimetres of rain during THIS observation interval — not a running
+    /// total. The station reports a cumulative tipping-bucket counter and
+    /// WeatherKit reports an hourly amount; the builder converts both, because
+    /// a raw counter used as a regressor is a monotone ramp that acts as a
+    /// hidden time trend.
     var rainfallMM: Double?
     /// Absolute pressure at the site, NOT reduced to sea level. WeatherKit's
     /// figure is converted before it gets here so both sources mean the same
@@ -178,6 +190,60 @@ struct IndoorObservation: Sendable {
             }
         }
         return out
+    }
+}
+
+// MARK: - Infiltration terms
+
+/// The wind-driven infiltration regressors, shared by both equations.
+///
+/// Direction is encoded as its sine and cosine rather than as degrees. Raw
+/// degrees would put 350 and 10 at opposite ends of the range although they are
+/// nearly the same wind; sin/cos places them next to each other and removes the
+/// seam entirely. Fitting a coefficient on each is the same as fitting one
+/// sinusoid with a free amplitude and phase, so the model can learn that wind
+/// from one bearing drives more infiltration than from another — and the pair
+/// of coefficients says which bearing.
+///
+/// Direction never acts alone: it multiplies the wind term, because a bearing
+/// means nothing without a wind behind it.
+struct InfiltrationTerms {
+    /// Sustained wind, m/s.
+    let wind: Double
+    /// How much the gusts exceed the sustained wind. Gust and wind are strongly
+    /// correlated, so the excess is used instead of the raw gust: it carries
+    /// the part gustiness adds without duplicating a column the model already
+    /// has, which would leave the ridge splitting one effect across two terms.
+    let gustExcess: Double
+    let sinDirection: Double
+    let cosDirection: Double
+    /// Rain during the interval, mm.
+    let rain: Double
+
+    init(_ o: OutdoorValues) {
+        let w = o.windSpeedMS ?? 0
+        wind = w
+        gustExcess = max(0, (o.windGustMS ?? w) - w)
+        if let deg = o.windDirectionDeg {
+            let r = deg * .pi / 180
+            sinDirection = sin(r)
+            cosDirection = cos(r)
+        } else {
+            // No direction known: the modulation terms vanish and the model
+            // falls back to undirected wind rather than losing the row.
+            sinDirection = 0
+            cosDirection = 0
+        }
+        rain = o.rainfallMM ?? 0
+    }
+
+    /// Terms that scale with a driving gradient (indoor-outdoor temperature or
+    /// dew point difference), in a fixed order.
+    func scaled(by gradient: Double) -> [Double] {
+        [wind * gradient,
+         gustExcess * gradient,
+         wind * gradient * sinDirection,
+         wind * gradient * cosDirection]
     }
 }
 
@@ -309,20 +375,17 @@ struct IndoorModel: Sendable, Equatable {
                                     _ plan: OutdoorSourcePlan) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity else { return nil }
-        let wind = out.windSpeedMS ?? 0
         let gap = tOut - o.indoorTempC
         let wetBulb = IndoorPsychrometrics.wetBulbC(
             temperatureC: tOut, relativeHumidity: rhOut,
             pressureHPa: out.stationPressureHPa) ?? tOut
-        return [
-            1,
-            gap,
-            o.solar,
-            wind * gap,
-            o.hvac == .evaporativeCooler ? (wetBulb - o.indoorTempC) : 0,
-            o.hvac == .airConditioning ? 1 : 0,
-            o.hvac == .heating ? 1 : 0,
-        ]
+        let terms = InfiltrationTerms(out)
+        return [1, gap, o.solar]
+            + terms.scaled(by: gap)
+            + [terms.rain,
+               o.hvac == .evaporativeCooler ? (wetBulb - o.indoorTempC) : 0,
+               o.hvac == .airConditioning ? 1 : 0,
+               o.hvac == .heating ? 1 : 0]
     }
 
     /// dD_in/dt design row. Order must match `dewPoint`.
@@ -335,13 +398,16 @@ struct IndoorModel: Sendable, Equatable {
         let wetBulb = IndoorPsychrometrics.wetBulbC(
             temperatureC: tOut, relativeHumidity: rhOut,
             pressureHPa: out.stationPressureHPa) ?? tOut
-        return [
-            1,
-            dOut - o.indoorDewPointC,
-            o.hvac == .evaporativeCooler ? (wetBulb - o.indoorDewPointC) : 0,
-            o.hvac == .airConditioning ? 1 : 0,
-            o.hvac == .heating ? 1 : 0,
-        ]
+        // The same air leakage that carries heat carries moisture, so the
+        // infiltration terms appear here too, driven by the dew point gradient.
+        let terms = InfiltrationTerms(out)
+        let gradient = dOut - o.indoorDewPointC
+        return [1, gradient]
+            + terms.scaled(by: gradient)
+            + [terms.rain,
+               o.hvac == .evaporativeCooler ? (wetBulb - o.indoorDewPointC) : 0,
+               o.hvac == .airConditioning ? 1 : 0,
+               o.hvac == .heating ? 1 : 0]
     }
 
     /// Observed rates, per hour.

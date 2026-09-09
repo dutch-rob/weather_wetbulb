@@ -193,20 +193,73 @@ struct IndoorObservation: Sendable {
     }
 }
 
+// MARK: - Wind direction encoding
+
+/// How the wind's bearing enters the model.
+///
+/// Both are fitted and compared on held-out error, because which is right
+/// depends on the house and cannot be known in advance.
+enum WindDirectionEncoding: String, CaseIterable, Sendable {
+
+    /// One sine and one cosine term.
+    ///
+    /// Cheap — two coefficients — but it assumes a shape: a single harmonic has
+    /// exactly one best bearing and forces its worst to lie 180 degrees
+    /// opposite. That is a real pattern for some buildings and wrong for
+    /// others, e.g. one with two exposed faces.
+    case harmonic
+
+    /// A cyclic linear spline ("tent" basis) over eight knots at 45 degrees.
+    ///
+    /// Each bearing is split between its two neighbouring knots in proportion
+    /// to angular distance, so a wind from NNE contributes half to N and half
+    /// to NE. This assumes no shape at all: any pattern across the eight knots
+    /// can be represented. It stays continuous, so bearings close on the
+    /// compass still have similar effects — the property a plain 8- or 16-way
+    /// categorical split throws away, since it would leave adjacent sectors
+    /// unrelated and discontinuous at every bin edge.
+    ///
+    /// Splitting each observation across two knots also ties neighbouring
+    /// coefficients together, which is useful regularisation while history is
+    /// short. The cost is eight coefficients where the harmonic needs two.
+    case tentBasis
+
+    /// Knots, from north, clockwise: N NE E SE S SW W NW.
+    static let knotCount = 8
+
+    /// Weight on each knot for a bearing in degrees.
+    ///
+    /// Continuous rather than a 16-row lookup, so it handles WeatherKit's
+    /// arbitrary bearings as well as the station's 22.5-degree steps — and for
+    /// those steps it reproduces the 1 / 0.5-0.5 pattern exactly.
+    static func tentWeights(_ degrees: Double?) -> [Double] {
+        guard let degrees, degrees.isFinite else {
+            // Bearing unknown. Spreading the weight evenly keeps the row's
+            // total wind effect intact — it contributes the AVERAGE of the
+            // eight directional coefficients — instead of silently zeroing the
+            // wind term, which is what leaving the weights empty would do.
+            return [Double](repeating: 1 / Double(knotCount), count: knotCount)
+        }
+        let spacing = 360.0 / Double(knotCount)
+        var angle = degrees.truncatingRemainder(dividingBy: 360)
+        if angle < 0 { angle += 360 }
+        let position = angle / spacing
+        let lower = Int(position.rounded(.down)) % knotCount
+        let upper = (lower + 1) % knotCount
+        let fraction = position - position.rounded(.down)
+        var weights = [Double](repeating: 0, count: knotCount)
+        weights[lower] += 1 - fraction
+        weights[upper] += fraction
+        return weights
+    }
+}
+
 // MARK: - Infiltration terms
 
 /// The wind-driven infiltration regressors, shared by both equations.
 ///
-/// Direction is encoded as its sine and cosine rather than as degrees. Raw
-/// degrees would put 350 and 10 at opposite ends of the range although they are
-/// nearly the same wind; sin/cos places them next to each other and removes the
-/// seam entirely. Fitting a coefficient on each is the same as fitting one
-/// sinusoid with a free amplitude and phase, so the model can learn that wind
-/// from one bearing drives more infiltration than from another — and the pair
-/// of coefficients says which bearing.
-///
-/// Direction never acts alone: it multiplies the wind term, because a bearing
-/// means nothing without a wind behind it.
+/// Direction never acts alone: it always multiplies the wind term, because a
+/// bearing means nothing without a wind behind it.
 struct InfiltrationTerms {
     /// Sustained wind, m/s.
     let wind: Double
@@ -215,8 +268,7 @@ struct InfiltrationTerms {
     /// the part gustiness adds without duplicating a column the model already
     /// has, which would leave the ridge splitting one effect across two terms.
     let gustExcess: Double
-    let sinDirection: Double
-    let cosDirection: Double
+    let directionDegrees: Double?
     /// Rain during the interval, mm.
     let rain: Double
 
@@ -224,26 +276,37 @@ struct InfiltrationTerms {
         let w = o.windSpeedMS ?? 0
         wind = w
         gustExcess = max(0, (o.windGustMS ?? w) - w)
-        if let deg = o.windDirectionDeg {
-            let r = deg * .pi / 180
-            sinDirection = sin(r)
-            cosDirection = cos(r)
-        } else {
-            // No direction known: the modulation terms vanish and the model
-            // falls back to undirected wind rather than losing the row.
-            sinDirection = 0
-            cosDirection = 0
-        }
+        directionDegrees = o.windDirectionDeg
         rain = o.rainfallMM ?? 0
     }
 
-    /// Terms that scale with a driving gradient (indoor-outdoor temperature or
-    /// dew point difference), in a fixed order.
-    func scaled(by gradient: Double) -> [Double] {
-        [wind * gradient,
-         gustExcess * gradient,
-         wind * gradient * sinDirection,
-         wind * gradient * cosDirection]
+    /// Terms that scale with a driving gradient (the indoor-outdoor temperature
+    /// or dew point difference), in a fixed order.
+    ///
+    /// Note what the tent basis does NOT include: a separate undirected
+    /// `wind * gradient` column. The eight tent weights sum to 1 for every
+    /// observation, so those columns would add up to exactly that term and the
+    /// design would be singular. Dropping it lets the eight coefficients carry
+    /// the wind effect outright, each reading as "infiltration per unit wind
+    /// per degree of gap, for wind from this bearing". The harmonic encoding
+    /// has no such problem — sine and cosine sum to nothing constant — so it
+    /// keeps the undirected term as its baseline.
+    func scaled(by gradient: Double, encoding: WindDirectionEncoding) -> [Double] {
+        let driven = wind * gradient
+        switch encoding {
+        case .harmonic:
+            let radians = (directionDegrees ?? 0) * .pi / 180
+            // With no bearing the modulation vanishes and the undirected term
+            // carries the effect on its own.
+            let known = directionDegrees != nil
+            return [driven,
+                    gustExcess * gradient,
+                    known ? driven * sin(radians) : 0,
+                    known ? driven * cos(radians) : 0]
+        case .tentBasis:
+            return [gustExcess * gradient]
+                + WindDirectionEncoding.tentWeights(directionDegrees).map { $0 * driven }
+        }
     }
 }
 
@@ -346,6 +409,8 @@ enum LeastSquares {
 /// plan that says where each outdoor variable came from.
 struct IndoorModel: Sendable, Equatable {
     var plan: OutdoorSourcePlan
+    /// How wind direction entered this fit.
+    var encoding: WindDirectionEncoding
     /// Coefficients of the dT_in/dt equation, in `temperatureFeatures` order.
     var temperature: [Double]
     /// Coefficients of the dD_in/dt equation, in `dewPointFeatures` order.
@@ -372,7 +437,8 @@ struct IndoorModel: Sendable, Equatable {
 
     /// dT_in/dt design row. Order must match `temperature`.
     static func temperatureFeatures(_ o: IndoorObservation,
-                                    _ plan: OutdoorSourcePlan) -> [Double]? {
+                                    _ plan: OutdoorSourcePlan,
+                                    _ encoding: WindDirectionEncoding) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity else { return nil }
         let gap = tOut - o.indoorTempC
@@ -381,7 +447,7 @@ struct IndoorModel: Sendable, Equatable {
             pressureHPa: out.stationPressureHPa) ?? tOut
         let terms = InfiltrationTerms(out)
         return [1, gap, o.solar]
-            + terms.scaled(by: gap)
+            + terms.scaled(by: gap, encoding: encoding)
             + [terms.rain,
                o.hvac == .evaporativeCooler ? (wetBulb - o.indoorTempC) : 0,
                o.hvac == .airConditioning ? 1 : 0,
@@ -390,7 +456,8 @@ struct IndoorModel: Sendable, Equatable {
 
     /// dD_in/dt design row. Order must match `dewPoint`.
     static func dewPointFeatures(_ o: IndoorObservation,
-                                 _ plan: OutdoorSourcePlan) -> [Double]? {
+                                 _ plan: OutdoorSourcePlan,
+                                 _ encoding: WindDirectionEncoding) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity,
               let dOut = IndoorPsychrometrics.dewPointC(
@@ -403,7 +470,7 @@ struct IndoorModel: Sendable, Equatable {
         let terms = InfiltrationTerms(out)
         let gradient = dOut - o.indoorDewPointC
         return [1, gradient]
-            + terms.scaled(by: gradient)
+            + terms.scaled(by: gradient, encoding: encoding)
             + [terms.rain,
                o.hvac == .evaporativeCooler ? (wetBulb - o.indoorDewPointC) : 0,
                o.hvac == .airConditioning ? 1 : 0,
@@ -427,14 +494,15 @@ struct IndoorModel: Sendable, Equatable {
     static func fit(train: [IndoorObservation],
                     test: [IndoorObservation],
                     plan: OutdoorSourcePlan,
+                    encoding: WindDirectionEncoding = .harmonic,
                     now: Date = .now) -> IndoorModel? {
 
         func assemble(_ rows: [IndoorObservation],
-                      _ features: (IndoorObservation, OutdoorSourcePlan) -> [Double]?,
+                      _ features: (IndoorObservation, OutdoorSourcePlan, WindDirectionEncoding) -> [Double]?,
                       _ target: (IndoorObservation) -> Double) -> ([[Double]], [Double]) {
             var x: [[Double]] = [], y: [Double] = []
             for o in rows {
-                guard let f = features(o, plan) else { continue }
+                guard let f = features(o, plan, encoding) else { continue }
                 let t = target(o)
                 guard t.isFinite, f.allSatisfy(\.isFinite) else { continue }
                 x.append(f); y.append(t)
@@ -451,7 +519,8 @@ struct IndoorModel: Sendable, Equatable {
         let (txD, tyD) = assemble(test, dewPointFeatures, dewPointTarget)
         guard let score = score(txT, tyT, betaT, txD, tyD, betaD) else { return nil }
 
-        return IndoorModel(plan: plan, temperature: betaT, dewPoint: betaD,
+        return IndoorModel(plan: plan, encoding: encoding,
+                           temperature: betaT, dewPoint: betaD,
                            score: score, fittedAt: now,
                            observationCount: xT.count)
     }
@@ -493,8 +562,8 @@ struct IndoorModel: Sendable, Equatable {
     /// Integrating this repeatedly is how the forecast scenarios are produced:
     /// override `hvac` to ask "what if the cooler were on".
     func step(from o: IndoorObservation, dt: Double) -> (temperatureC: Double, dewPointC: Double)? {
-        guard let fT = Self.temperatureFeatures(o, plan),
-              let fD = Self.dewPointFeatures(o, plan),
+        guard let fT = Self.temperatureFeatures(o, plan, encoding),
+              let fD = Self.dewPointFeatures(o, plan, encoding),
               fT.count == temperature.count, fD.count == dewPoint.count else { return nil }
         let rateT = zip(fT, temperature).reduce(0) { $0 + $1.0 * $1.1 }
         let rateD = zip(fD, dewPoint).reduce(0) { $0 + $1.0 * $1.1 }

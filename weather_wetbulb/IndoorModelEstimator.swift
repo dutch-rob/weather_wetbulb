@@ -49,6 +49,40 @@ enum IndoorModelEstimator {
         var swapsAccepted: [OutdoorVariable]
         /// Passes used before the search settled.
         var passes: Int
+        /// Best held-out score reached under each direction encoding, so the
+        /// debug screen can show what the alternative would have cost.
+        var scoreByEncoding: [WindDirectionEncoding: IndoorModel.Score] = [:]
+    }
+
+    /// Run the source search under every wind-direction encoding and keep the
+    /// best overall.
+    ///
+    /// Which encoding suits a house cannot be known in advance — it depends on
+    /// how the building sits in its wind — so it is chosen the same way the
+    /// sources are: by held-out error. The harmonic will tend to win while
+    /// history is short, since it spends two coefficients where the tent basis
+    /// spends eight; the tent basis should overtake it once there is enough
+    /// data to support the extra freedom, and only if the house actually has a
+    /// directional pattern a single sinusoid cannot express.
+    static func selectModel(train: [IndoorObservation],
+                            test: [IndoorObservation],
+                            maxPasses: Int = 7,
+                            now: Date = .now) -> Selection? {
+        var best: Selection?
+        var scores: [WindDirectionEncoding: IndoorModel.Score] = [:]
+
+        for encoding in WindDirectionEncoding.allCases {
+            guard let candidate = selectSources(train: train, test: test,
+                                                encoding: encoding,
+                                                maxPasses: maxPasses, now: now)
+            else { continue }
+            scores[encoding] = candidate.model.score
+            if best == nil || candidate.model.score < best!.model.score {
+                best = candidate
+            }
+        }
+        best?.scoreByEncoding = scores
+        return best
     }
 
     /// Fit both whole-source models, keep the better, then try swapping one
@@ -60,14 +94,17 @@ enum IndoorModelEstimator {
     /// variables a pathological cycle could otherwise run a long time.
     static func selectSources(train: [IndoorObservation],
                               test: [IndoorObservation],
+                              encoding: WindDirectionEncoding = .harmonic,
                               maxPasses: Int = 7,
                               now: Date = .now) -> Selection? {
         guard !train.isEmpty, !test.isEmpty else { return nil }
 
         let wkPlan = OutdoorSourcePlan(all: .weatherKit)
         let stationPlan = OutdoorSourcePlan(all: .station)
-        let wkModel = IndoorModel.fit(train: train, test: test, plan: wkPlan, now: now)
-        let stationModel = IndoorModel.fit(train: train, test: test, plan: stationPlan, now: now)
+        let wkModel = IndoorModel.fit(train: train, test: test, plan: wkPlan,
+                                      encoding: encoding, now: now)
+        let stationModel = IndoorModel.fit(train: train, test: test, plan: stationPlan,
+                                           encoding: encoding, now: now)
 
         // Start from whichever whole-source fit is better.
         var best: IndoorModel
@@ -86,7 +123,8 @@ enum IndoorModelEstimator {
             for v in OutdoorVariable.allCases {
                 let candidatePlan = best.plan.swapping(v)
                 guard let candidate = IndoorModel.fit(
-                    train: train, test: test, plan: candidatePlan, now: now) else { continue }
+                    train: train, test: test, plan: candidatePlan,
+                    encoding: encoding, now: now) else { continue }
                 // Strictly better only: an equal score means the swap bought
                 // nothing, and flipping anyway would let the search oscillate.
                 if candidate.score < best.score {

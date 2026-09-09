@@ -204,6 +204,63 @@ struct WindDirectionEncodingTests {
         }
     }
 
+    @Test func ventAndCoolerDriveTowardDifferentTargets() {
+        // The wetted cooler pulls temperature toward the outdoor WET-BULB and
+        // adds moisture; venting is dry, so it pulls toward outdoor AIR
+        // temperature and dew point. They must not share a column.
+        let base = Self.twoFacedHouse(count: 4)[0]
+        func features(_ state: HVACState) -> [Double] {
+            let o = IndoorObservation(
+                date: base.date, dt: base.dt,
+                indoorTempC: base.indoorTempC, indoorDewPointC: base.indoorDewPointC,
+                nextIndoorTempC: base.nextIndoorTempC, nextIndoorDewPointC: base.nextIndoorDewPointC,
+                weatherKit: base.weatherKit, station: base.station,
+                solar: base.solar, hvac: state)
+            return IndoorModel.temperatureFeatures(o, OutdoorSourcePlan(all: .station), .harmonic)!
+        }
+        let cooler = features(.evaporativeCooler)
+        let vent = features(.vent)
+        let count = cooler.count
+        let coolerIndex = IndoorModel.equipmentIndex(.evaporativeCooler, in: count)!
+        let ventIndex = IndoorModel.equipmentIndex(.vent, in: count)!
+
+        // Each fills only its own slot.
+        #expect(cooler[coolerIndex] != 0)
+        #expect(cooler[ventIndex] == 0)
+        #expect(vent[ventIndex] != 0)
+        #expect(vent[coolerIndex] == 0)
+        // And they are genuinely different quantities, not the same number in
+        // two places: wet-bulb gap versus dry-bulb gap.
+        #expect(abs(cooler[coolerIndex] - vent[ventIndex]) > 0.01)
+    }
+
+    @Test func unknownRowsNeverReachTheFit() {
+        var rows = Self.twoFacedHouse(count: 300)
+        // Poison a band inside the TRAINING half. Poisoning the tail instead
+        // would leave the held-out slice entirely unknown, and fit() would
+        // correctly return nil for want of anything to score against.
+        for i in rows.indices where (100..<150).contains(i) {
+            let o = rows[i]
+            rows[i] = IndoorObservation(
+                date: o.date, dt: o.dt,
+                indoorTempC: o.indoorTempC, indoorDewPointC: o.indoorDewPointC,
+                nextIndoorTempC: o.indoorTempC + 50, nextIndoorDewPointC: o.indoorDewPointC,
+                weatherKit: o.weatherKit, station: o.station,
+                solar: o.solar, hvac: .unknown)
+        }
+        let (train, test) = IndoorModelEstimator.split(rows)
+        guard let m = IndoorModel.fit(train: train, test: test,
+                                      plan: OutdoorSourcePlan(all: .station),
+                                      encoding: .harmonic) else {
+            #expect(Bool(false)); return
+        }
+        // 300 rows split 225/75; 50 poisoned rows sit inside the training
+        // half, so exactly 175 should have been fitted.
+        #expect(m.observationCount == 175)
+        // And conduction survives intact rather than being dragged by +50 jumps.
+        #expect(m.temperature[1] > 0.2)
+    }
+
     @Test func steppingWorksUnderTheTentBasis() {
         let all = Self.twoFacedHouse(count: 400)
         let (train, test) = IndoorModelEstimator.split(all)

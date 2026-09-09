@@ -158,6 +158,39 @@ struct IndoorObservationBuilderTests {
         #expect(built.first?.hvac == .off)
     }
 
+    @Test func unknownStretchesAreExcludedNotAssumedOff() {
+        // "Unknown" must remove rows from the fit. Treating it as off would
+        // attribute whatever actually ran to the passive terms, which is the
+        // error the label exists to prevent.
+        let readings = [Self.reading(minutesFromStart: 0),
+                        Self.reading(minutesFromStart: 18, indoorC: 22.4),
+                        Self.reading(minutesFromStart: 36, indoorC: 22.8),
+                        Self.reading(minutesFromStart: 54, indoorC: 23.2)]
+        let weather = [Self.forecast(minutesFromStart: 0, tempC: 18)]
+
+        // Unknown from the start; back to a known state partway through.
+        // Back to a known state at +30 min: inside the 18→36 pair, which is
+        // therefore dropped as ambiguous, leaving 36→54 as the only clean one.
+        let events = [HVACEvent(date: Self.t0.addingTimeInterval(-60), mode: -1),
+                      HVACEvent(date: Self.t0.addingTimeInterval(30 * 60), mode: 0)]
+        let built = IndoorObservationBuilder.build(readings: readings, weather: weather,
+                                                   hvacEvents: events)
+        // Only the last pair survives: the first two are unknown, and the pair
+        // containing the transition is dropped as ambiguous.
+        #expect(built.count == 1)
+        #expect(built.first!.hvac == .off)
+    }
+
+    @Test func ventIsItsOwnStateNotCooling() {
+        let readings = [Self.reading(minutesFromStart: 0),
+                        Self.reading(minutesFromStart: 18, indoorC: 22.4)]
+        let weather = [Self.forecast(minutesFromStart: 0, tempC: 18)]
+        let events = [HVACEvent(date: Self.t0.addingTimeInterval(-60), mode: 3)]
+        let built = IndoorObservationBuilder.build(readings: readings, weather: weather,
+                                                   hvacEvents: events)
+        #expect(built.first?.hvac == .vent)
+    }
+
     // MARK: - WeatherKit alignment
 
     @Test func weatherKitValuesAreInterpolatedBetweenHours() {

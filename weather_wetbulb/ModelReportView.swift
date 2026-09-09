@@ -32,6 +32,7 @@ struct ModelReportView: View {
     @State private var report: Report?
     @State private var building = true
     @State private var addingEvent = false
+    @State private var exportFile: URL?
 
     var body: some View {
         NavigationStack {
@@ -70,7 +71,10 @@ struct ModelReportView: View {
                 }
             }
         }
-        .task { await build() }
+        .task {
+            await build()
+            exportFile = writeExport()
+        }
         .sheet(isPresented: $addingEvent, onDismiss: { Task { await build() } }) {
             EventEditorView()
         }
@@ -182,6 +186,12 @@ struct ModelReportView: View {
                 addingEvent = true
             } label: {
                 Label("Add event", systemImage: "plus.circle")
+            }
+
+            if let file = exportFile {
+                ShareLink(item: file) {
+                    Label("Export events", systemImage: "square.and.arrow.up")
+                }
             }
 
             if timeline.isEmpty {
@@ -297,6 +307,43 @@ struct ModelReportView: View {
         }
     }
 
+    // MARK: - Export
+
+    /// Write the events to a temporary JSON file for sharing.
+    ///
+    /// Sharing a file is the only reliable way off the phone: iCloud sync
+    /// carries the store to the user's other devices, but nothing on a Mac
+    /// opens it, so the data is invisible there. AirDrop or Files puts it
+    /// somewhere the development archive can pick it up.
+    private func writeExport() -> URL? {
+        struct Exported: Codable {
+            var date: Date
+            var kind: String
+            var mode: Int?
+            var isOn: Bool?
+            var targetTempC: Double?
+            /// 0 logged by hand, 1 inferred by the app.
+            var source: Int
+        }
+        var rows: [Exported] = coolerEvents.map {
+            Exported(date: $0.date, kind: "cooler", mode: nil, isOn: $0.isOn,
+                     targetTempC: nil, source: $0.source)
+        }
+        rows += hvacEvents.map {
+            Exported(date: $0.date, kind: "hvac", mode: $0.mode, isOn: nil,
+                     targetTempC: $0.targetTempC, source: $0.source)
+        }
+        rows.sort { $0.date > $1.date }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(rows) else { return nil }
+        let url = URL.temporaryDirectory.appending(path: "wetbulbcast-events.json")
+        do { try data.write(to: url, options: .atomic) } catch { return nil }
+        return url
+    }
+
     // MARK: - Event timeline
 
     private struct Entry: Identifiable {
@@ -319,9 +366,11 @@ struct ModelReportView: View {
         all += hvacEvents.map {
             let title: String
             switch $0.mode {
+            case -1: title = "Unknown — excluded from the model"
             case 1:  title = "Heating on"
             case 2:  title = "Air conditioning on"
-            default: title = "Thermostat off"
+            case 3:  title = "Vent (cooler, no water)"
+            default: title = "Nothing running"
             }
             return Entry(date: $0.date, title: title,
                          setpoint: $0.targetTempC, inferred: $0.source == 1, hvac: $0)
@@ -333,6 +382,7 @@ struct ModelReportView: View {
 
     private static let equipment: [(state: HVACState, name: String)] = [
         (.evaporativeCooler, "Evaporative cooler"),
+        (.vent, "Vent (cooler, no water)"),
         (.airConditioning, "Air conditioning"),
         (.heating, "Heating"),
     ]

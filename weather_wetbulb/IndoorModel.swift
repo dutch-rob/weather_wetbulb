@@ -108,12 +108,23 @@ struct OutdoorSourcePlan: Equatable, Sendable {
 /// HVAC state over an observation interval. `.unknown` is its own case rather
 /// than a synonym for `.off`: treating unlabelled time as "off" would teach the
 /// model that cooling sometimes happens for no reason.
-enum HVACState: Int, Sendable, Equatable {
+enum HVACState: Int, Sendable, Equatable, CaseIterable {
+    /// Explicitly not known. Rows carrying this are EXCLUDED from fitting
+    /// rather than guessed at: a wrong label is worse than a missing one,
+    /// because it teaches the model that equipment does something it didn't.
     case unknown = -1
     case off = 0
     case evaporativeCooler = 1
     case airConditioning = 2
     case heating = 3
+    /// The swamp cooler's fan running dry — no water on the pads.
+    ///
+    /// Physically this is not cooling at all, it is forced infiltration: it
+    /// pulls outside air through the house. So it gets its own terms driving
+    /// indoor conditions toward OUTDOOR temperature and dew point, quite unlike
+    /// the wetted cooler, which drives temperature toward the outdoor wet-bulb
+    /// and adds moisture.
+    case vent = 4
 }
 
 /// Outdoor conditions from a single source at one instant. Optional throughout:
@@ -450,6 +461,9 @@ struct IndoorModel: Sendable, Equatable {
             + terms.scaled(by: gap, encoding: encoding)
             + [terms.rain,
                o.hvac == .evaporativeCooler ? (wetBulb - o.indoorTempC) : 0,
+               // Venting drags the inside toward the outside AIR temperature,
+               // not the wet-bulb: there is no evaporation without water.
+               o.hvac == .vent ? gap : 0,
                o.hvac == .airConditioning ? 1 : 0,
                o.hvac == .heating ? 1 : 0]
     }
@@ -473,6 +487,9 @@ struct IndoorModel: Sendable, Equatable {
             + terms.scaled(by: gradient, encoding: encoding)
             + [terms.rain,
                o.hvac == .evaporativeCooler ? (wetBulb - o.indoorDewPointC) : 0,
+               // Venting exchanges moisture with outside air without adding
+               // any, so it pulls toward the outdoor dew point.
+               o.hvac == .vent ? gradient : 0,
                o.hvac == .airConditioning ? 1 : 0,
                o.hvac == .heating ? 1 : 0]
     }
@@ -491,14 +508,16 @@ struct IndoorModel: Sendable, Equatable {
     var temperatureLabels: [String] {
         ["baseline drift", "conduction (out − in)", "solar gain"]
             + Self.infiltrationLabels(encoding, gradient: "ΔT")
-            + ["rain", "evaporative cooler", "air conditioning", "heating"]
+            + ["rain", "evaporative cooler", "vent (cooler, dry)",
+               "air conditioning", "heating"]
     }
 
     /// Human-readable names for `dewPoint`, in coefficient order.
     var dewPointLabels: [String] {
         ["baseline drift", "moisture exchange (out − in)"]
             + Self.infiltrationLabels(encoding, gradient: "ΔDp")
-            + ["rain", "evaporative cooler", "air conditioning", "heating"]
+            + ["rain", "evaporative cooler", "vent (cooler, dry)",
+               "air conditioning", "heating"]
     }
 
     private static func infiltrationLabels(_ encoding: WindDirectionEncoding,
@@ -516,13 +535,14 @@ struct IndoorModel: Sendable, Equatable {
 
     /// Index of the coefficient for a given piece of equipment, in both
     /// equations the last three entries.
+    /// Equipment coefficients occupy the last four slots of either equation,
+    /// in this order.
+    static let equipmentOrder: [HVACState] = [.evaporativeCooler, .vent,
+                                              .airConditioning, .heating]
+
     static func equipmentIndex(_ state: HVACState, in count: Int) -> Int? {
-        switch state {
-        case .evaporativeCooler: return count - 3
-        case .airConditioning:   return count - 2
-        case .heating:           return count - 1
-        default:                 return nil
-        }
+        guard let offset = equipmentOrder.firstIndex(of: state) else { return nil }
+        return count - equipmentOrder.count + offset
     }
 
     // MARK: Fitting
@@ -542,6 +562,11 @@ struct IndoorModel: Sendable, Equatable {
                       _ target: (IndoorObservation) -> Double) -> ([[Double]], [Double]) {
             var x: [[Double]] = [], y: [Double] = []
             for o in rows {
+                // An unknown label means the equipment state was not recorded.
+                // Fitting such a row would attribute whatever happened to the
+                // passive terms, which is exactly the error the label exists to
+                // avoid.
+                guard o.hvac != .unknown else { continue }
                 guard let f = features(o, plan, encoding) else { continue }
                 let t = target(o)
                 guard t.isFinite, f.allSatisfy(\.isFinite) else { continue }

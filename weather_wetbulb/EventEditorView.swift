@@ -24,7 +24,9 @@ import SwiftData
 /// does not care about that split: at any moment one thing is running, so the
 /// picker offers one list and this decides where the row goes.
 enum EquipmentChange: Int, CaseIterable, Identifiable {
+    case unknown = -1
     case off = 0
+    case vent = 4
     case evaporativeCooler = 1
     case airConditioning = 2
     case heating = 3
@@ -33,10 +35,24 @@ enum EquipmentChange: Int, CaseIterable, Identifiable {
 
     var name: String {
         switch self {
+        case .unknown:           return "Unknown"
         case .off:               return "Nothing running"
+        case .vent:              return "Vent (cooler, no water)"
         case .evaporativeCooler: return "Evaporative cooler"
         case .airConditioning:   return "Air conditioning"
         case .heating:           return "Heating"
+        }
+    }
+
+    /// Shown under the picker so the two unusual choices explain themselves.
+    var explanation: String? {
+        switch self {
+        case .unknown:
+            return "Readings from here until the next event are left out of the model entirely. Use this when you do not know what was running — a wrong label is worse than none."
+        case .vent:
+            return "The swamp cooler's fan with dry pads: no cooling, just outside air pulled through the house. The model treats it as extra infiltration rather than as cooling."
+        default:
+            return nil
         }
     }
 
@@ -58,6 +74,10 @@ enum EquipmentChange: Int, CaseIterable, Identifiable {
             context.insert(HVACEvent(date: date, mode: 2, targetTempC: setpointC, source: 0))
         case .heating:
             context.insert(HVACEvent(date: date, mode: 1, targetTempC: setpointC, source: 0))
+        case .vent:
+            context.insert(HVACEvent(date: date, mode: 3, targetTempC: nil, source: 0))
+        case .unknown:
+            context.insert(HVACEvent(date: date, mode: -1, targetTempC: nil, source: 0))
         }
     }
 }
@@ -87,6 +107,10 @@ struct EventEditorView: View {
                         ForEach(EquipmentChange.allCases) { Text($0.name).tag($0) }
                     }
                     .pickerStyle(.wheel)
+                    if let explanation = change.explanation {
+                        Text(explanation)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 } header: {
                     Text("What changed")
                 }

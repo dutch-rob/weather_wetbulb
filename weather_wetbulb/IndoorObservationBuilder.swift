@@ -74,6 +74,13 @@ enum IndoorObservationBuilder {
             // A state change inside the interval makes both labels wrong.
             guard !timeline.hasTransition(between: a.date, and: b.date) else { continue }
 
+            // An explicitly unknown stretch is excluded rather than assumed
+            // off. This is the difference between "nothing was running" and
+            // "nobody recorded what was running", and only the first is safe
+            // to fit.
+            let state = timeline.state(at: a.date)
+            guard state != .unknown else { continue }
+
             var wk = weatherKitValues(at: a.date, in: series)
             // WeatherKit reports an hourly amount, so scale it to this interval.
             if let hourly = wk.values.rainfallMM {
@@ -96,7 +103,7 @@ enum IndoorObservationBuilder {
                 weatherKit: wk.values,
                 station: stationOut,
                 solar: solar(station: a, weatherKit: wk.point),
-                hvac: timeline.state(at: a.date)))
+                hvac: state))
         }
         return out
     }
@@ -229,8 +236,10 @@ struct HVACTimeline {
         for e in hvacEvents {
             let state: HVACState
             switch e.mode {
+            case -1: state = .unknown
             case 1:  state = .heating
             case 2:  state = .airConditioning
+            case 3:  state = .vent
             default: state = .off
             }
             all.append((e.date, state))

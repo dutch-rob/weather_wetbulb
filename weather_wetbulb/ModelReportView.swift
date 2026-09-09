@@ -23,6 +23,7 @@ struct ModelReportView: View {
     let series: [ForecastPoint]
 
     @Environment(\.modelContext) private var context
+    @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit = false
     @Environment(\.dismiss) private var dismiss
 
     @Query(sort: \CoolerEvent.date, order: .reverse) private var coolerEvents: [CoolerEvent]
@@ -30,28 +31,35 @@ struct ModelReportView: View {
 
     @State private var report: Report?
     @State private var building = true
+    @State private var addingEvent = false
 
     var body: some View {
         NavigationStack {
             Group {
                 if building {
                     ProgressView("Fitting…").frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let report {
+                } else {
                     List {
-                        fitSection(report)
-                        equipmentSection(report)
-                        coefficientSection("Temperature  (°C per hour)",
-                                           report.model.temperatureLabels,
-                                           report.model.temperature)
-                        coefficientSection("Dew point  (°C per hour)",
-                                           report.model.dewPointLabels,
-                                           report.model.dewPoint)
-                        sourceSection(report)
-                        coverageSection(report)
+                        // Events stay reachable even with no model. Logging one
+                        // is most useful before the readings arrive, not after,
+                        // and a full-screen placeholder would block the only
+                        // way to record what the equipment is doing.
+                        if let report {
+                            fitSection(report)
+                            equipmentSection(report)
+                            coefficientSection("Temperature  (°C per hour)",
+                                               report.model.temperatureLabels,
+                                               report.model.temperature)
+                            coefficientSection("Dew point  (°C per hour)",
+                                               report.model.dewPointLabels,
+                                               report.model.dewPoint)
+                            sourceSection(report)
+                            coverageSection(report)
+                        } else {
+                            unavailable
+                        }
                         eventSection
                     }
-                } else {
-                    unavailable
                 }
             }
             .navigationTitle("Model")
@@ -63,6 +71,9 @@ struct ModelReportView: View {
             }
         }
         .task { await build() }
+        .sheet(isPresented: $addingEvent, onDismiss: { Task { await build() } }) {
+            EventEditorView()
+        }
     }
 
     // MARK: - Sections
@@ -167,8 +178,14 @@ struct ModelReportView: View {
 
     private var eventSection: some View {
         Section {
+            Button {
+                addingEvent = true
+            } label: {
+                Label("Add event", systemImage: "plus.circle")
+            }
+
             if timeline.isEmpty {
-                Text("No events recorded. The fit assumes nothing was running.")
+                Text("Nothing recorded, so the fit assumes nothing has ever run.")
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(timeline) { entry in
@@ -183,24 +200,48 @@ struct ModelReportView: View {
                         Text(Self.stamp(entry.date))
                             .font(.caption).foregroundStyle(.secondary)
                         if let setpoint = entry.setpoint {
-                            Text(String(format: "set to %.1f °C", setpoint))
+                            Text(setpointText(setpoint))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
+                .onDelete(perform: deleteEvents)
             }
         } header: {
             Text("Events, newest first")
         } footer: {
-            Text("Unlabelled time is treated as nothing running. That is an assumption: an unrecorded hour of cooling is attributed to the passive terms instead, which flattens them.")
+            Text("Everything before the first event counts as nothing running, so an event-free stretch needs no marking. Unlabelled time AFTER an event is attributed to that event — an unrecorded change flattens the passive terms.")
         }
     }
 
+    private func setpointText(_ celsius: Double) -> String {
+        useFahrenheit ? String(format: "set to %.0f °F", celsius * 9 / 5 + 32)
+                      : String(format: "set to %.1f °C", celsius)
+    }
+
+    /// Remove events. Deleting is how a mistyped one is corrected: re-add it
+    /// with the right time rather than editing in place, which would have to
+    /// know which of the two record types it came from.
+    private func deleteEvents(at offsets: IndexSet) {
+        for index in offsets {
+            let entry = timeline[index]
+            if let cooler = entry.cooler { context.delete(cooler) }
+            if let hvac = entry.hvac { context.delete(hvac) }
+        }
+        try? context.save()
+        Task { await build() }
+    }
+
     private var unavailable: some View {
-        ContentUnavailableView(
-            "Not enough data yet",
-            systemImage: "chart.xyaxis.line",
-            description: Text("The model needs a stretch of station readings close enough together to measure a rate of change. Readings arrive about every 18 minutes."))
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("No model yet", systemImage: "chart.xyaxis.line")
+                    .font(.headline)
+                Text("The model needs a stretch of station readings close enough together to measure a rate of change. Readings arrive about every 18 minutes.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
     }
 
     // MARK: - Building
@@ -264,6 +305,8 @@ struct ModelReportView: View {
         let title: String
         let setpoint: Double?
         let inferred: Bool
+        var cooler: CoolerEvent?
+        var hvac: HVACEvent?
     }
 
     /// Both event kinds merged, newest first.
@@ -271,7 +314,7 @@ struct ModelReportView: View {
         var all: [Entry] = coolerEvents.map {
             Entry(date: $0.date,
                   title: $0.isOn ? "Evaporative cooler on" : "Evaporative cooler off",
-                  setpoint: nil, inferred: $0.source == 1)
+                  setpoint: nil, inferred: $0.source == 1, cooler: $0)
         }
         all += hvacEvents.map {
             let title: String
@@ -281,7 +324,7 @@ struct ModelReportView: View {
             default: title = "Thermostat off"
             }
             return Entry(date: $0.date, title: title,
-                         setpoint: $0.targetTempC, inferred: $0.source == 1)
+                         setpoint: $0.targetTempC, inferred: $0.source == 1, hvac: $0)
         }
         return all.sorted { $0.date > $1.date }
     }

@@ -262,9 +262,9 @@ struct IndoorObservationBuilderTests {
     }
 
     @Test func windDirectionSurvivesAMissingEndpoint() {
-        #expect(IndoorObservationBuilder.lerpAngle(nil, 90, 0.5) == 90)
-        #expect(IndoorObservationBuilder.lerpAngle(90, nil, 0.5) == 90)
-        #expect(IndoorObservationBuilder.lerpAngle(nil, nil, 0.5) == nil)
+        #expect(WindDirectionEncoding.lerpAngle(nil, 90, 0.5) == 90)
+        #expect(WindDirectionEncoding.lerpAngle(90, nil, 0.5) == 90)
+        #expect(WindDirectionEncoding.lerpAngle(nil, nil, 0.5) == nil)
     }
 
     // MARK: - Rainfall

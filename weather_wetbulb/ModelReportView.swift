@@ -190,7 +190,7 @@ struct ModelReportView: View {
 
             if let file = exportFile {
                 ShareLink(item: file) {
-                    Label("Export events", systemImage: "square.and.arrow.up")
+                    Label("Export model and data", systemImage: "square.and.arrow.up")
                 }
             }
 
@@ -309,39 +309,19 @@ struct ModelReportView: View {
 
     // MARK: - Export
 
-    /// Write the events to a temporary JSON file for sharing.
+    /// Write everything the fit used, plus what it produced, for sharing.
     ///
-    /// Sharing a file is the only reliable way off the phone: iCloud sync
-    /// carries the store to the user's other devices, but nothing on a Mac
-    /// opens it, so the data is invisible there. AirDrop or Files puts it
-    /// somewhere the development archive can pick it up.
+    /// The whole bundle rather than just the events: a fit done elsewhere from
+    /// different inputs cannot be compared with this one. With the readings,
+    /// the WeatherKit series and the resulting coefficients all present, an
+    /// offline refit either reproduces `model` or reveals a bug.
     private func writeExport() -> URL? {
-        struct Exported: Codable {
-            var date: Date
-            var kind: String
-            var mode: Int?
-            var isOn: Bool?
-            var targetTempC: Double?
-            /// 0 logged by hand, 1 inferred by the app.
-            var source: Int
-        }
-        var rows: [Exported] = coolerEvents.map {
-            Exported(date: $0.date, kind: "cooler", mode: nil, isOn: $0.isOn,
-                     targetTempC: nil, source: $0.source)
-        }
-        rows += hvacEvents.map {
-            Exported(date: $0.date, kind: "hvac", mode: $0.mode, isOn: nil,
-                     targetTempC: $0.targetTempC, source: $0.source)
-        }
-        rows.sort { $0.date > $1.date }
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(rows) else { return nil }
-        let url = URL.temporaryDirectory.appending(path: "wetbulbcast-events.json")
-        do { try data.write(to: url, options: .atomic) } catch { return nil }
-        return url
+        ModelExport.build(readings: IndoorFeedStore.history(source: .vevorStation,
+                                                            context: context),
+                          weather: series,
+                          coolerEvents: coolerEvents,
+                          hvacEvents: hvacEvents,
+                          model: report?.model).write()
     }
 
     // MARK: - Event timeline

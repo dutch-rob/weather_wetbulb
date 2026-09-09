@@ -142,33 +142,13 @@ enum IndoorObservationBuilder {
             humidity: lerp(before.humidity, after.humidity) * 100,
             windSpeedMS: lerp(before.windSpeedKPH, after.windSpeedKPH) / 3.6,
             windGustMS: lerp(before.windGustKPH, after.windGustKPH) / 3.6,
-            windDirectionDeg: lerpAngle(before.windDirectionDegrees,
-                                        after.windDirectionDegrees, fraction),
+            windDirectionDeg: WindDirectionEncoding.lerpAngle(
+                before.windDirectionDegrees, after.windDirectionDegrees, fraction),
             rainfallMM: lerp(before.precipitationMM, after.precipitationMM),
             // Already reduced to the site's actual pressure, so it means the
             // same thing as the station's reading.
             stationPressureHPa: lerp(before.stationPressurePa, after.stationPressurePa) / 100)
         return (values, fraction < 0.5 ? before : after)
-    }
-
-    /// Interpolate a compass bearing.
-    ///
-    /// Bearings wrap, so plain interpolation is wrong at the seam: halfway
-    /// between 350 and 10 is north, but averaging the numbers gives 180 —
-    /// exactly the opposite direction. Interpolating the unit vectors instead
-    /// crosses the seam correctly.
-    static func lerpAngle(_ a: Double?, _ b: Double?, _ fraction: Double) -> Double? {
-        guard let a else { return b }
-        guard let b else { return a }
-        let ra = a * .pi / 180, rb = b * .pi / 180
-        let x = cos(ra) + (cos(rb) - cos(ra)) * fraction
-        let y = sin(ra) + (sin(rb) - sin(ra)) * fraction
-        // Both vectors cancelling means the two bearings are opposite and the
-        // midpoint is genuinely undefined; keep the earlier one rather than
-        // inventing a direction from rounding noise.
-        guard x * x + y * y > 1e-12 else { return a }
-        let degrees = atan2(y, x) * 180 / .pi
-        return degrees < 0 ? degrees + 360 : degrees
     }
 
     /// The two points surrounding `date` plus how far between them it sits.

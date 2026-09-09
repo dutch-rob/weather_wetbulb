@@ -179,6 +179,31 @@ struct WindDirectionEncodingTests {
         #expect(selection?.model.encoding == .harmonic)
     }
 
+    @Test func everyCoefficientHasALabelUnderBothEncodings() {
+        // The report screen pairs labels with coefficients using zip, which
+        // silently truncates. A short label list would hide real coefficients
+        // rather than fail, so the counts must match exactly.
+        let all = Self.twoFacedHouse(count: 300)
+        let (train, test) = IndoorModelEstimator.split(all)
+        for encoding in WindDirectionEncoding.allCases {
+            guard let m = IndoorModel.fit(train: train, test: test,
+                                          plan: OutdoorSourcePlan(all: .weatherKit),
+                                          encoding: encoding) else {
+                #expect(Bool(false), "fit failed for \(encoding)")
+                continue
+            }
+            #expect(m.temperatureLabels.count == m.temperature.count,
+                    "temperature labels mismatch for \(encoding)")
+            #expect(m.dewPointLabels.count == m.dewPoint.count,
+                    "dew point labels mismatch for \(encoding)")
+            // The equipment indices the report reads must land on the last
+            // three entries, in cooler / AC / heating order.
+            #expect(IndoorModel.equipmentIndex(.heating, in: m.temperature.count)
+                    == m.temperature.count - 1)
+            #expect(m.temperatureLabels.last == "heating")
+        }
+    }
+
     @Test func steppingWorksUnderTheTentBasis() {
         let all = Self.twoFacedHouse(count: 400)
         let (train, test) = IndoorModelEstimator.split(all)

@@ -485,6 +485,46 @@ struct IndoorModel: Sendable, Equatable {
         (o.nextIndoorDewPointC - o.indoorDewPointC) / (o.dt / 3600)
     }
 
+    // MARK: Labels
+
+    /// Human-readable names for `temperature`, in coefficient order.
+    var temperatureLabels: [String] {
+        ["baseline drift", "conduction (out − in)", "solar gain"]
+            + Self.infiltrationLabels(encoding, gradient: "ΔT")
+            + ["rain", "evaporative cooler", "air conditioning", "heating"]
+    }
+
+    /// Human-readable names for `dewPoint`, in coefficient order.
+    var dewPointLabels: [String] {
+        ["baseline drift", "moisture exchange (out − in)"]
+            + Self.infiltrationLabels(encoding, gradient: "ΔDp")
+            + ["rain", "evaporative cooler", "air conditioning", "heating"]
+    }
+
+    private static func infiltrationLabels(_ encoding: WindDirectionEncoding,
+                                           gradient: String) -> [String] {
+        switch encoding {
+        case .harmonic:
+            return ["wind × \(gradient)", "gustiness × \(gradient)",
+                    "wind × \(gradient) × sin(dir)", "wind × \(gradient) × cos(dir)"]
+        case .tentBasis:
+            return ["gustiness × \(gradient)"]
+                + ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+                    .map { "wind × \(gradient) from \($0)" }
+        }
+    }
+
+    /// Index of the coefficient for a given piece of equipment, in both
+    /// equations the last three entries.
+    static func equipmentIndex(_ state: HVACState, in count: Int) -> Int? {
+        switch state {
+        case .evaporativeCooler: return count - 3
+        case .airConditioning:   return count - 2
+        case .heating:           return count - 1
+        default:                 return nil
+        }
+    }
+
     // MARK: Fitting
 
     /// Fit both equations on `train` and score on `test`.

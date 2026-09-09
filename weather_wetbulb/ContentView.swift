@@ -41,6 +41,8 @@ struct ContentView: View {
     /// The moment showing at the top of the table, so switching between the
     /// table and a graph keeps the same place in time.
     @State private var tableTopDate: Date? = nil
+    /// Model report sheet, reachable from the graph screen's left button.
+    @State private var showModelReport = false
     /// Which graph to come back to from the table.
     @State private var lastGraph: ForecastScreen = .today
 
@@ -487,6 +489,7 @@ struct ContentView: View {
     private var foldTab: some View {
         VStack(spacing: 0) {
             headerBar("graph",
+                      left: ("model", { showModelReport = true }),
                       right: showTable ? ("table", { goToTable() }) : nil)
             FoldTimelineView(
                 series: weather.isRefreshing ? [] : panSeries,
@@ -498,6 +501,9 @@ struct ContentView: View {
                 attribution: weather.attribution,
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
             )
+        }
+        .sheet(isPresented: $showModelReport) {
+            ModelReportView(series: weather.seriesFull)
         }
     }
 }

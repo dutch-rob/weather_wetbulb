@@ -64,6 +64,10 @@ enum IndoorModelEstimator {
     /// spends eight; the tent basis should overtake it once there is enough
     /// data to support the extra freedom, and only if the house actually has a
     /// directional pattern a single sinusoid cannot express.
+    /// Relative gain a more complex encoding must show before it is preferred.
+    /// One percent of the combined score: below that the difference is noise.
+    static let meaningfulImprovement = 0.01
+
     static func selectModel(train: [IndoorObservation],
                             test: [IndoorObservation],
                             maxPasses: Int = 7,
@@ -77,7 +81,17 @@ enum IndoorModelEstimator {
                                                 maxPasses: maxPasses, now: now)
             else { continue }
             scores[encoding] = candidate.model.score
-            if best == nil || candidate.model.score < best!.model.score {
+            // Prefer the SIMPLER encoding unless the richer one is better by a
+            // margin that means something. Encodings are tried cheapest-first,
+            // and with no wind direction in the data the tent basis collapses
+            // to exactly the harmonic's undirected term — identical fits that
+            // differ only in ridge rounding. Without this the search would
+            // carry eight coefficients to buy nothing.
+            if let current = best {
+                if candidate.model.score.combined < current.model.score.combined * (1 - meaningfulImprovement) {
+                    best = candidate
+                }
+            } else {
                 best = candidate
             }
         }

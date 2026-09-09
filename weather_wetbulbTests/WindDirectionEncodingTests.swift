@@ -159,6 +159,26 @@ struct WindDirectionEncodingTests {
         #expect(selection.scoreByEncoding.count == WindDirectionEncoding.allCases.count)
     }
 
+    @Test func aTieGoesToTheSimplerEncoding() {
+        // With no wind direction in the data the tent basis collapses to the
+        // harmonic's undirected wind term — identical fits differing only by
+        // ridge rounding. The cheaper encoding must win, or the model would
+        // carry eight coefficients for nothing.
+        var stripped: [IndoorObservation] = []
+        for o in Self.twoFacedHouse(count: 400) {
+            var v = o.station
+            v.windDirectionDeg = nil
+            stripped.append(IndoorObservation(
+                date: o.date, dt: o.dt,
+                indoorTempC: o.indoorTempC, indoorDewPointC: o.indoorDewPointC,
+                nextIndoorTempC: o.nextIndoorTempC, nextIndoorDewPointC: o.nextIndoorDewPointC,
+                weatherKit: v, station: v, solar: o.solar, hvac: o.hvac))
+        }
+        let (train, test) = IndoorModelEstimator.split(stripped)
+        let selection = IndoorModelEstimator.selectModel(train: train, test: test)
+        #expect(selection?.model.encoding == .harmonic)
+    }
+
     @Test func steppingWorksUnderTheTentBasis() {
         let all = Self.twoFacedHouse(count: 400)
         let (train, test) = IndoorModelEstimator.split(all)

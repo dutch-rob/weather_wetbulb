@@ -287,6 +287,15 @@ struct IndoorObservationBuilderTests {
         #expect(IndoorObservationBuilder.solar(station: r, weatherKit: night) == 0)
     }
 
+    @Test func aDeadLightSensorFallsBackToCloudCover() {
+        // The Vevor's light channel reports a constant 0, like its UV index.
+        // A present-but-zero reading must not win over the fallback, or the
+        // solar term is silently deleted for every row.
+        let r = Self.reading(minutesFromStart: 0, lightKLux: 0)
+        let p = Self.forecast(minutesFromStart: 0, tempC: 18, cloud: 0.25, daylight: true)
+        #expect(abs(IndoorObservationBuilder.solar(station: r, weatherKit: p) - 0.75) < 0.001)
+    }
+
     @Test func solarIsClampedToTheUnitRange() {
         // Brighter than the assumed full sun must not exceed 1, or it would act
         // as an outsized gain term on a single freak reading.

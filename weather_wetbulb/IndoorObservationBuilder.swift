@@ -193,7 +193,13 @@ enum IndoorObservationBuilder {
     /// WeatherKit cloud cover is the fallback, gated by daylight so a clear
     /// night reads as zero rather than as full sun.
     static func solar(station: IndoorReading, weatherKit: ForecastPoint?) -> Double {
-        if let klux = station.lightKLux {
+        // Only trust a NON-ZERO station reading. The Vevor's light channel
+        // reports a constant 0 — the same dead channel as its UV index — and a
+        // present-but-zero value would otherwise win over the fallback and
+        // silently delete the solar term. A working sensor reading a true zero
+        // loses nothing: that means darkness, and the fallback returns 0 too,
+        // since it is gated by daylight.
+        if let klux = station.lightKLux, klux > 0 {
             return min(max(klux / fullSunKLux, 0), 1)
         }
         guard let p = weatherKit, p.isDaylight else { return 0 }

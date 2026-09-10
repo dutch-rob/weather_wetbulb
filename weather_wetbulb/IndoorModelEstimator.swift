@@ -52,6 +52,69 @@ enum IndoorModelEstimator {
         /// Best held-out score reached under each direction encoding, so the
         /// debug screen can show what the alternative would have cost.
         var scoreByEncoding: [WindDirectionEncoding: IndoorModel.Score] = [:]
+        /// Whether the coil model was estimated from the data or left at its
+        /// default, and why.
+        var coilNote: String = ""
+    }
+
+    // MARK: - Coil temperature
+
+    /// AC observations needed before the coil temperature is estimated rather
+    /// than assumed. Below this the search would be fitting a handful of points.
+    static let coilSearchMinimumObservations = 15
+    /// Additional observations, and outdoor spread, before the coil is allowed
+    /// to vary WITH outdoor temperature. A slope fitted across two similar days
+    /// is not a relationship, it is noise with a direction.
+    static let coilSlopeMinimumObservations = 30
+    static let coilSlopeMinimumOutdoorSpreadC: Double = 5
+
+    /// Search coil parameters by held-out error, holding sources and encoding
+    /// fixed.
+    ///
+    /// The coil affects only rows where the AC was running, while sources and
+    /// encoding are driven by the whole record, so refining it afterwards costs
+    /// far less than nesting it inside the source search and changes little.
+    static func refineCoil(model: IndoorModel,
+                           train: [IndoorObservation],
+                           test: [IndoorObservation],
+                           now: Date = .now) -> (model: IndoorModel, note: String) {
+        let acRows = (train + test).filter { $0.hvac == .airConditioning }
+        guard acRows.count >= coilSearchMinimumObservations else {
+            return (model, "assumed \(Int(model.coil.baseC)) °C — only \(acRows.count) AC observations")
+        }
+
+        let outdoorTemps = acRows.compactMap { $0.outdoor(model.plan).temperatureC }
+        let spread = (outdoorTemps.max() ?? 0) - (outdoorTemps.min() ?? 0)
+        let slopeAllowed = acRows.count >= coilSlopeMinimumObservations
+            && spread >= coilSlopeMinimumOutdoorSpreadC
+        // Range chosen wide enough that a result landing on the edge is
+        // meaningful rather than an artefact of where the grid stopped.
+        let slopes: [Double] = slopeAllowed
+            ? stride(from: 0.0, through: 0.60, by: 0.05).map { $0 } : [0]
+
+        var best = model
+        for base in stride(from: 2.0, through: 16.0, by: 1.0) {
+            for slope in slopes {
+                let coil = CoilTemperature(baseC: base, perOutdoorDegree: slope)
+                guard let candidate = IndoorModel.fit(train: train, test: test,
+                                                      plan: model.plan,
+                                                      encoding: model.encoding,
+                                                      coil: coil, now: now)
+                else { continue }
+                if candidate.score < best.score { best = candidate }
+            }
+        }
+        let note: String
+        if best.coil == model.coil {
+            note = "assumed \(Int(model.coil.baseC)) °C — no setting scored better"
+        } else if slopeAllowed {
+            note = String(format: "estimated %.0f °C at 25 °C outdoor, %+.2f °C per outdoor degree",
+                          best.coil.baseC, best.coil.perOutdoorDegree)
+        } else {
+            note = String(format: "estimated %.0f °C; outdoor range only %.1f °C, too narrow to tell whether it varies",
+                          best.coil.baseC, spread)
+        }
+        return (best, note)
     }
 
     /// Run the source search under every wind-direction encoding and keep the
@@ -96,6 +159,12 @@ enum IndoorModelEstimator {
             }
         }
         best?.scoreByEncoding = scores
+        if var winner = best {
+            let refined = refineCoil(model: winner.model, train: train, test: test, now: now)
+            winner.model = refined.model
+            winner.coilNote = refined.note
+            best = winner
+        }
         return best
     }
 

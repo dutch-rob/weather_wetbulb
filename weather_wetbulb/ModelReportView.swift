@@ -96,6 +96,12 @@ struct ModelReportView: View {
             if let constant = r.timeConstantHours {
                 row("Passive time constant", String(format: "%.1f h", constant))
             }
+            if !r.coilNote.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AC coil temperature")
+                    Text(r.coilNote).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         } header: {
             Text("Fit")
         } footer: {
@@ -268,7 +274,8 @@ struct ModelReportView: View {
             report = nil
             return
         }
-        report = Report(model: selection.model, observations: observations)
+        report = Report(model: selection.model, observations: observations,
+                        coilNote: selection.coilNote)
     }
 
     // MARK: - Report
@@ -276,6 +283,8 @@ struct ModelReportView: View {
     struct Report {
         let model: IndoorModel
         let observations: [IndoorObservation]
+        /// How the coil temperature was arrived at, in words.
+        var coilNote: String = ""
 
         /// Hours for the passive response to close most of an indoor-outdoor
         /// gap. Only meaningful when conduction came out positive.

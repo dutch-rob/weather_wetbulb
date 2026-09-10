@@ -285,6 +285,41 @@ enum WindDirectionEncoding: String, CaseIterable, Sendable {
     }
 }
 
+// MARK: - Air conditioning
+
+/// Temperature of the AC's cooling coil, which sets how far it can dry the air.
+///
+/// The coil is what condenses moisture out: the indoor dew point falls only
+/// while it is above the coil, and asymptotically approaches it. So the coil
+/// temperature is both the threshold for dehumidification and the floor it
+/// heads toward, which is what makes it estimable from how the dew point
+/// behaves while the AC runs.
+///
+/// It is not a constant. A compressor cannot bring its refrigerant as low when
+/// the outdoor unit is rejecting heat into hot air, so the coil runs warmer on
+/// hot days. That is modelled as a straight line in outdoor temperature,
+/// centred at 25 °C so `baseC` reads as "coil temperature on a 25 °C day"
+/// rather than an extrapolation to freezing.
+struct CoilTemperature: Sendable, Equatable, Codable {
+    /// Coil temperature when it is 25 °C outside.
+    var baseC: Double = 7
+    /// How much warmer the coil runs per degree of outdoor warmth.
+    var perOutdoorDegree: Double = 0
+
+    static let referenceOutdoorC: Double = 25
+
+    func celsius(outdoorC: Double?) -> Double {
+        baseC + perOutdoorDegree * ((outdoorC ?? Self.referenceOutdoorC) - Self.referenceOutdoorC)
+    }
+
+    /// How hard the AC is working to dry the air, as the dew point's distance
+    /// above the coil. Zero once the air is already drier than the coil, when
+    /// no condensation happens at all.
+    func latentDrive(indoorDewPointC: Double, outdoorC: Double?) -> Double {
+        max(0, indoorDewPointC - celsius(outdoorC: outdoorC))
+    }
+}
+
 // MARK: - Infiltration terms
 
 /// The wind-driven infiltration regressors, shared by both equations.
@@ -442,6 +477,8 @@ struct IndoorModel: Sendable, Equatable {
     var plan: OutdoorSourcePlan
     /// How wind direction entered this fit.
     var encoding: WindDirectionEncoding
+    /// Coil model used for the AC's latent term.
+    var coil: CoilTemperature
     /// Coefficients of the dT_in/dt equation, in `temperatureFeatures` order.
     var temperature: [Double]
     /// Coefficients of the dD_in/dt equation, in `dewPointFeatures` order.
@@ -469,7 +506,8 @@ struct IndoorModel: Sendable, Equatable {
     /// dT_in/dt design row. Order must match `temperature`.
     static func temperatureFeatures(_ o: IndoorObservation,
                                     _ plan: OutdoorSourcePlan,
-                                    _ encoding: WindDirectionEncoding) -> [Double]? {
+                                    _ encoding: WindDirectionEncoding,
+                                    _ coil: CoilTemperature) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity else { return nil }
         let gap = tOut - o.indoorTempC
@@ -480,6 +518,11 @@ struct IndoorModel: Sendable, Equatable {
         return [1, gap, o.solar]
             + terms.scaled(by: gap, encoding: encoding)
             + [terms.rain,
+               // Energy spent condensing water is energy not spent lowering
+               // the temperature, so this is expected to come out POSITIVE:
+               // the harder the AC is drying, the less it cools.
+               o.hvac == .airConditioning
+                   ? coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut) : 0,
                o.hvac == .evaporativeCooler ? (wetBulb - o.indoorTempC) : 0,
                // Venting drags the inside toward the outside AIR temperature,
                // not the wet-bulb: there is no evaporation without water.
@@ -491,7 +534,8 @@ struct IndoorModel: Sendable, Equatable {
     /// dD_in/dt design row. Order must match `dewPoint`.
     static func dewPointFeatures(_ o: IndoorObservation,
                                  _ plan: OutdoorSourcePlan,
-                                 _ encoding: WindDirectionEncoding) -> [Double]? {
+                                 _ encoding: WindDirectionEncoding,
+                                 _ coil: CoilTemperature) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity,
               let dOut = IndoorPsychrometrics.dewPointC(
@@ -506,6 +550,11 @@ struct IndoorModel: Sendable, Equatable {
         return [1, gradient]
             + terms.scaled(by: gradient, encoding: encoding)
             + [terms.rain,
+               // Drying happens only while the dew point is above the coil,
+               // and stops as it approaches it. Expected NEGATIVE: this is the
+               // moisture being removed.
+               o.hvac == .airConditioning
+                   ? coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut) : 0,
                o.hvac == .evaporativeCooler ? (wetBulb - o.indoorDewPointC) : 0,
                // Venting exchanges moisture with outside air without adding
                // any, so it pulls toward the outdoor dew point.
@@ -528,16 +577,16 @@ struct IndoorModel: Sendable, Equatable {
     var temperatureLabels: [String] {
         ["baseline drift", "conduction (out − in)", "solar gain"]
             + Self.infiltrationLabels(encoding, gradient: "ΔT")
-            + ["rain", "evaporative cooler", "vent (cooler, dry)",
-               "air conditioning", "heating"]
+            + ["rain", "AC dehumidifying", "evaporative cooler",
+               "vent (cooler, dry)", "air conditioning", "heating"]
     }
 
     /// Human-readable names for `dewPoint`, in coefficient order.
     var dewPointLabels: [String] {
         ["baseline drift", "moisture exchange (out − in)"]
             + Self.infiltrationLabels(encoding, gradient: "ΔDp")
-            + ["rain", "evaporative cooler", "vent (cooler, dry)",
-               "air conditioning", "heating"]
+            + ["rain", "AC dehumidifying", "evaporative cooler",
+               "vent (cooler, dry)", "air conditioning", "heating"]
     }
 
     private static func infiltrationLabels(_ encoding: WindDirectionEncoding,
@@ -575,10 +624,11 @@ struct IndoorModel: Sendable, Equatable {
                     test: [IndoorObservation],
                     plan: OutdoorSourcePlan,
                     encoding: WindDirectionEncoding = .harmonic,
+                    coil: CoilTemperature = CoilTemperature(),
                     now: Date = .now) -> IndoorModel? {
 
         func assemble(_ rows: [IndoorObservation],
-                      _ features: (IndoorObservation, OutdoorSourcePlan, WindDirectionEncoding) -> [Double]?,
+                      _ features: (IndoorObservation, OutdoorSourcePlan, WindDirectionEncoding, CoilTemperature) -> [Double]?,
                       _ target: (IndoorObservation) -> Double) -> ([[Double]], [Double]) {
             var x: [[Double]] = [], y: [Double] = []
             for o in rows {
@@ -587,7 +637,7 @@ struct IndoorModel: Sendable, Equatable {
                 // passive terms, which is exactly the error the label exists to
                 // avoid.
                 guard o.hvac != .unknown else { continue }
-                guard let f = features(o, plan, encoding) else { continue }
+                guard let f = features(o, plan, encoding, coil) else { continue }
                 let t = target(o)
                 guard t.isFinite, f.allSatisfy(\.isFinite) else { continue }
                 x.append(f); y.append(t)
@@ -604,7 +654,7 @@ struct IndoorModel: Sendable, Equatable {
         let (txD, tyD) = assemble(test, dewPointFeatures, dewPointTarget)
         guard let score = score(txT, tyT, betaT, txD, tyD, betaD) else { return nil }
 
-        return IndoorModel(plan: plan, encoding: encoding,
+        return IndoorModel(plan: plan, encoding: encoding, coil: coil,
                            temperature: betaT, dewPoint: betaD,
                            score: score, fittedAt: now,
                            observationCount: xT.count)
@@ -647,8 +697,8 @@ struct IndoorModel: Sendable, Equatable {
     /// Integrating this repeatedly is how the forecast scenarios are produced:
     /// override `hvac` to ask "what if the cooler were on".
     func step(from o: IndoorObservation, dt: Double) -> (temperatureC: Double, dewPointC: Double)? {
-        guard let fT = Self.temperatureFeatures(o, plan, encoding),
-              let fD = Self.dewPointFeatures(o, plan, encoding),
+        guard let fT = Self.temperatureFeatures(o, plan, encoding, coil),
+              let fD = Self.dewPointFeatures(o, plan, encoding, coil),
               fT.count == temperature.count, fD.count == dewPoint.count else { return nil }
         let rateT = zip(fT, temperature).reduce(0) { $0 + $1.0 * $1.1 }
         let rateD = zip(fD, dewPoint).reduce(0) { $0 + $1.0 * $1.1 }

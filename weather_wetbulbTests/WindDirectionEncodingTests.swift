@@ -216,7 +216,7 @@ struct WindDirectionEncodingTests {
                 nextIndoorTempC: base.nextIndoorTempC, nextIndoorDewPointC: base.nextIndoorDewPointC,
                 weatherKit: base.weatherKit, station: base.station,
                 solar: base.solar, hvac: state)
-            return IndoorModel.temperatureFeatures(o, OutdoorSourcePlan(all: .station), .harmonic)!
+            return IndoorModel.temperatureFeatures(o, OutdoorSourcePlan(all: .station), .harmonic, CoilTemperature())!
         }
         let cooler = features(.evaporativeCooler)
         let vent = features(.vent)
@@ -259,6 +259,68 @@ struct WindDirectionEncodingTests {
         #expect(m.observationCount == 175)
         // And conduction survives intact rather than being dragged by +50 jumps.
         #expect(m.temperature[1] > 0.2)
+    }
+
+    @Test func acDryingCostsCoolingPower() {
+        // The latent term must be non-zero only when the AC runs AND the indoor
+        // dew point is above the coil, and it must appear in BOTH equations —
+        // energy spent condensing water is energy not spent cooling.
+        let coil = CoilTemperature(baseC: 7, perOutdoorDegree: 0)
+        let base = Self.twoFacedHouse(count: 4)[0]
+        func rows(_ state: HVACState, dewPointC: Double) -> (temp: [Double], dew: [Double]) {
+            let o = IndoorObservation(
+                date: base.date, dt: base.dt,
+                indoorTempC: base.indoorTempC, indoorDewPointC: dewPointC,
+                nextIndoorTempC: base.nextIndoorTempC, nextIndoorDewPointC: base.nextIndoorDewPointC,
+                weatherKit: base.weatherKit, station: base.station,
+                solar: base.solar, hvac: state)
+            let plan = OutdoorSourcePlan(all: .station)
+            return (IndoorModel.temperatureFeatures(o, plan, .harmonic, coil)!,
+                    IndoorModel.dewPointFeatures(o, plan, .harmonic, coil)!)
+        }
+        // Latent term sits just before the four equipment slots.
+        let tempIndex = { (c: Int) in c - IndoorModel.equipmentOrder.count - 1 }
+
+        let humid = rows(.airConditioning, dewPointC: 17)   // 10 above the coil
+        #expect(abs(humid.temp[tempIndex(humid.temp.count)] - 10) < 1e-9)
+        #expect(abs(humid.dew[tempIndex(humid.dew.count)] - 10) < 1e-9)
+
+        // Already drier than the coil: nothing left to condense.
+        let dry = rows(.airConditioning, dewPointC: 3)
+        #expect(dry.temp[tempIndex(dry.temp.count)] == 0)
+
+        // Not running: no latent effect regardless of how humid it is.
+        let off = rows(.off, dewPointC: 17)
+        #expect(off.temp[tempIndex(off.temp.count)] == 0)
+        #expect(off.dew[tempIndex(off.dew.count)] == 0)
+    }
+
+    @Test func coilRunsWarmerWhenItIsHotOutside() {
+        let coil = CoilTemperature(baseC: 7, perOutdoorDegree: 0.2)
+        // At the 25 °C reference the base applies unchanged.
+        #expect(abs(coil.celsius(outdoorC: 25) - 7) < 1e-9)
+        // Ten degrees hotter outside lifts the coil by 2 °C.
+        #expect(abs(coil.celsius(outdoorC: 35) - 9) < 1e-9)
+        // And a cooler day brings it down.
+        #expect(abs(coil.celsius(outdoorC: 15) - 5) < 1e-9)
+        // Drying stops once the dew point reaches the coil.
+        #expect(coil.latentDrive(indoorDewPointC: 9, outdoorC: 35) == 0)
+        #expect(abs(coil.latentDrive(indoorDewPointC: 14, outdoorC: 35) - 5) < 1e-9)
+    }
+
+    @Test func coilIsNotEstimatedFromTooFewObservations() {
+        // With no AC rows at all the search must leave the default alone rather
+        // than wander to whatever scores best on unrelated data.
+        let all = Self.twoFacedHouse(count: 200)
+        let (train, test) = IndoorModelEstimator.split(all)
+        guard let m = IndoorModel.fit(train: train, test: test,
+                                      plan: OutdoorSourcePlan(all: .station),
+                                      encoding: .harmonic) else {
+            #expect(Bool(false)); return
+        }
+        let refined = IndoorModelEstimator.refineCoil(model: m, train: train, test: test)
+        #expect(refined.model.coil == CoilTemperature())
+        #expect(refined.note.contains("only 0 AC observations"))
     }
 
     @Test func steppingWorksUnderTheTentBasis() {

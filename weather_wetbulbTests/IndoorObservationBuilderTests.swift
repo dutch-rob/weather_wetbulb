@@ -267,6 +267,41 @@ struct IndoorObservationBuilderTests {
         #expect(WindDirectionEncoding.lerpAngle(nil, nil, 0.5) == nil)
     }
 
+    // MARK: - Solar geometry
+
+    @Test func theSunIsHighestAtLocalNoonAndDownAtNight() {
+        // Flagstaff-ish latitude, midsummer.
+        let lat = 35.3, lon = -111.66
+        func factor(hourUTC: Int) -> Double {
+            var c = DateComponents()
+            c.year = 2026; c.month = 6; c.day = 21; c.hour = hourUTC
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = TimeZone(secondsFromGMT: 0)!
+            return SolarGeometry.clearSkyFactor(date: cal.date(from: c)!,
+                                                latitude: lat, longitude: lon)
+        }
+        // Local noon at this longitude is about 19:00 UTC.
+        let noon = factor(hourUTC: 19)
+        let morning = factor(hourUTC: 14)
+        let midnight = factor(hourUTC: 7)
+        #expect(noon > morning)
+        #expect(midnight == 0)
+        #expect(noon > 0.9)
+    }
+
+    @Test func winterSunIsWeakerThanSummerSun() {
+        let lat = 35.3, lon = -111.66
+        func noon(month: Int) -> Double {
+            var c = DateComponents()
+            c.year = 2026; c.month = month; c.day = 21; c.hour = 19
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = TimeZone(secondsFromGMT: 0)!
+            return SolarGeometry.clearSkyFactor(date: cal.date(from: c)!,
+                                                latitude: lat, longitude: lon)
+        }
+        #expect(noon(month: 12) < noon(month: 6))
+    }
+
     // MARK: - Rainfall
 
     @Test func rainfallBecomesTheIncrementAcrossTheInterval() {

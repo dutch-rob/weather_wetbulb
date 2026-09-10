@@ -16,6 +16,43 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
+
+/// A wheel date picker with a settable minute step.
+///
+/// SwiftUI's DatePicker offers no way to change the minute increment, and
+/// single minutes are false precision here: nobody recalls switching the AC on
+/// at 14:37, and spinning sixty positions to reach a time you are guessing at
+/// is just friction.
+struct SteppedDatePicker: UIViewRepresentable {
+    @Binding var date: Date
+    var minuteInterval: Int = 5
+    var maximum: Date = Date()
+
+    func makeUIView(context: Context) -> UIDatePicker {
+        let picker = UIDatePicker()
+        picker.datePickerMode = .dateAndTime
+        picker.preferredDatePickerStyle = .wheels
+        picker.minuteInterval = minuteInterval
+        picker.maximumDate = maximum
+        picker.addTarget(context.coordinator,
+                         action: #selector(Coordinator.changed(_:)), for: .valueChanged)
+        return picker
+    }
+
+    func updateUIView(_ picker: UIDatePicker, context: Context) {
+        picker.maximumDate = maximum
+        if abs(picker.date.timeIntervalSince(date)) > 1 { picker.date = date }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var parent: SteppedDatePicker
+        init(_ parent: SteppedDatePicker) { self.parent = parent }
+        @objc func changed(_ picker: UIDatePicker) { parent.date = picker.date }
+    }
+}
 
 /// What the equipment changed to, as one flat choice.
 ///
@@ -83,6 +120,13 @@ enum EquipmentChange: Int, CaseIterable, Identifiable {
 }
 
 struct EventEditorView: View {
+    /// The event being edited, if any. Nil means a new one.
+    ///
+    /// Editing replaces rather than mutates: a change of equipment can move the
+    /// record between the cooler and thermostat tables, and replacing keeps one
+    /// path instead of two that must agree.
+    var editing: ExistingEvent?
+
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit = false
@@ -92,6 +136,18 @@ struct EventEditorView: View {
     @State private var hasSetpoint = false
     @State private var setpoint: Double = 22
     @State private var saveError: String?
+    @State private var loaded = false
+
+    /// A stored event handed to the editor, with whichever record it came from
+    /// so it can be removed when replaced.
+    struct ExistingEvent: Identifiable {
+        var id: Date { date }
+        var change: EquipmentChange
+        var date: Date
+        var setpointC: Double?
+        var cooler: CoolerEvent?
+        var hvac: HVACEvent?
+    }
 
     /// Setpoints are picked in whichever unit the rest of the app is showing,
     /// and converted on the way into the store, which is always Celsius.
@@ -117,10 +173,8 @@ struct EventEditorView: View {
                 }
 
                 Section {
-                    DatePicker("When", selection: $date,
-                               in: ...Date(),
-                               displayedComponents: [.date, .hourAndMinute])
-                        .datePickerStyle(.wheel)
+                    SteppedDatePicker(date: $date)
+                        .frame(height: 180)
                 } header: {
                     Text("When it changed")
                 } footer: {
@@ -150,7 +204,8 @@ struct EventEditorView: View {
             } message: {
                 Text(saveError ?? "")
             }
-            .navigationTitle("Add event")
+            .onAppear(perform: loadExisting)
+            .navigationTitle(editing == nil ? "Add event" : "Edit event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -163,6 +218,19 @@ struct EventEditorView: View {
         }
     }
 
+    /// Fill the wheels from the event being edited, once.
+    private func loadExisting() {
+        guard !loaded, let editing else { loaded = true; return }
+        loaded = true
+        change = editing.change
+        date = editing.date
+        if let celsius = editing.setpointC {
+            hasSetpoint = true
+            setpoint = useFahrenheit ? (celsius * 9 / 5 + 32).rounded()
+                                     : (celsius * 2).rounded() / 2
+        }
+    }
+
     private func formatted(_ value: Double) -> String {
         useFahrenheit ? String(format: "%.0f °F", value)
                       : String(format: "%.1f °C", value)
@@ -172,6 +240,12 @@ struct EventEditorView: View {
         var celsius: Double?
         if change.takesSetpoint && hasSetpoint {
             celsius = useFahrenheit ? (setpoint - 32) * 5 / 9 : setpoint
+        }
+        // Replace rather than mutate, so a change of equipment type moves the
+        // record to the right table without a second code path.
+        if let editing {
+            if let old = editing.cooler { context.delete(old) }
+            if let old = editing.hvac { context.delete(old) }
         }
         change.record(at: date, setpointC: celsius, context: context)
         do {

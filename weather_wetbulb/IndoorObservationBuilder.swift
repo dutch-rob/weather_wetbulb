@@ -20,6 +20,7 @@
 //
 
 import Foundation
+import CoreLocation
 
 enum IndoorObservationBuilder {
 
@@ -50,7 +51,8 @@ enum IndoorObservationBuilder {
     static func build(readings: [IndoorReading],
                       weather: [ForecastPoint],
                       coolerEvents: [CoolerEvent] = [],
-                      hvacEvents: [HVACEvent] = []) -> [IndoorObservation] {
+                      hvacEvents: [HVACEvent] = [],
+                      location: CLLocation? = nil) -> [IndoorObservation] {
 
         let rows = readings
             .filter(\.hasIndoorTarget)
@@ -102,7 +104,7 @@ enum IndoorObservationBuilder {
                 nextIndoorDewPointC: dB,
                 weatherKit: wk.values,
                 station: stationOut,
-                solar: solar(station: a, weatherKit: wk.point),
+                solar: solar(station: a, weatherKit: wk.point, location: location),
                 hvac: state))
         }
         return out
@@ -179,7 +181,9 @@ enum IndoorObservationBuilder {
     /// terrain that a forecast averaged over a wide area cannot know about.
     /// WeatherKit cloud cover is the fallback, gated by daylight so a clear
     /// night reads as zero rather than as full sun.
-    static func solar(station: IndoorReading, weatherKit: ForecastPoint?) -> Double {
+    static func solar(station: IndoorReading,
+                      weatherKit: ForecastPoint?,
+                      location: CLLocation? = nil) -> Double {
         // Only trust a NON-ZERO station reading. The Vevor's light channel
         // reports a constant 0 — the same dead channel as its UV index — and a
         // present-but-zero value would otherwise win over the fallback and
@@ -190,7 +194,17 @@ enum IndoorObservationBuilder {
             return min(max(klux / fullSunKLux, 0), 1)
         }
         guard let p = weatherKit, p.isDaylight else { return 0 }
-        return min(max(1 - p.cloudCover, 0), 1)
+        let clear = min(max(1 - p.cloudCover, 0), 1)
+        // Scale by how high the sun actually is. Without this, a clear hour
+        // near sunset counts the same as clear midday, and the fit has to
+        // average a driver that varies several-fold across a day — which it can
+        // only do by under-crediting the peak, exactly when it matters most.
+        guard let location else { return clear }
+        let elevation = SolarGeometry.clearSkyFactor(
+            date: station.date,
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude)
+        return clear * elevation
     }
 }
 

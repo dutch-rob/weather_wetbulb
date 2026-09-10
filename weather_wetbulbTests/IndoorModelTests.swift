@@ -63,6 +63,53 @@ struct IndoorModelTests {
         #expect(LeastSquares.fit(x: x, y: [1, 2]) == nil)
     }
 
+    // MARK: - Sign constraints
+
+    @Test func constrainedFitRefusesAPhysicallyImpossibleSign() {
+        // y is driven DOWN by x1, but x1 is constrained non-negative. The fit
+        // must zero it rather than return the negative value that scores best.
+        var x: [[Double]] = [], y: [Double] = []
+        for i in 0..<40 {
+            let x1 = Double(i % 7) * 0.5
+            x.append([1, x1])
+            y.append(2 - 3 * x1)
+        }
+        let free = LeastSquares.fit(x: x, y: y)
+        #expect(free != nil)
+        #expect(free![1] < 0)                      // unconstrained wants negative
+
+        let bound = LeastSquares.fit(x: x, y: y, constraints: [.free, .nonNegative])
+        #expect(bound != nil)
+        #expect(bound![1] == 0)                    // clamped away
+    }
+
+    @Test func constrainedFitLeavesLegitimateSignsAlone() {
+        var x: [[Double]] = [], y: [Double] = []
+        for i in 0..<40 {
+            let x1 = Double(i % 7) * 0.5
+            x.append([1, x1])
+            y.append(2 + 3 * x1)
+        }
+        let bound = LeastSquares.fit(x: x, y: y, constraints: [.free, .nonNegative])
+        #expect(bound != nil)
+        #expect(abs(bound![1] - 3) < 1e-6)
+    }
+
+    @Test func coolerCanNeverBeFittedAsAHeater() {
+        // The constraint that matters most: whatever the residuals look like,
+        // running a swamp cooler must never come out as warming the house.
+        let constraints = IndoorModel.temperatureConstraints(.harmonic)
+        let count = 13                              // harmonic temperature width
+        #expect(constraints.count == count)
+        let coolerIndex = IndoorModel.equipmentIndex(.evaporativeCooler, in: count)!
+        let heatIndex = IndoorModel.equipmentIndex(.heating, in: count)!
+        let acIndex = IndoorModel.equipmentIndex(.airConditioning, in: count)!
+        #expect(constraints[coolerIndex].violated(by: -0.1))
+        #expect(!constraints[coolerIndex].violated(by: 0.1))
+        #expect(constraints[heatIndex].violated(by: -0.1))
+        #expect(constraints[acIndex].violated(by: 0.1))     // AC cannot warm
+    }
+
     // MARK: - Synthetic house
 
     /// A house obeying exactly the model's own equations, so a correct fit must

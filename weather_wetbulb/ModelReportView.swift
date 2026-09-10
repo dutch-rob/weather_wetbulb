@@ -32,6 +32,7 @@ struct ModelReportView: View {
     @State private var report: Report?
     @State private var building = true
     @State private var addingEvent = false
+    @State private var editingEvent: EventEditorView.ExistingEvent?
     @State private var exportFile: URL?
 
     var body: some View {
@@ -74,6 +75,9 @@ struct ModelReportView: View {
         .task { await build() }
         .sheet(isPresented: $addingEvent, onDismiss: { Task { await build() } }) {
             EventEditorView()
+        }
+        .sheet(item: $editingEvent, onDismiss: { Task { await build() } }) { existing in
+            EventEditorView(editing: existing)
         }
     }
 
@@ -208,7 +212,24 @@ struct ModelReportView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(timeline) { entry in
-                    VStack(alignment: .leading, spacing: 2) {
+                    Button {
+                        editingEvent = existing(from: entry)
+                    } label: {
+                        eventRow(entry)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onDelete(perform: deleteEvents)
+            }
+        } header: {
+            Text("Events, newest first")
+        } footer: {
+            Text("Tap an event to correct it. Everything before the first event counts as nothing running, so an event-free stretch needs no marking. Unlabelled time AFTER an event is attributed to that event — an unrecorded change flattens the passive terms.")
+        }
+    }
+
+    private func eventRow(_ entry: Entry) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
                         HStack {
                             Text(entry.title)
                             Spacer()
@@ -216,21 +237,27 @@ struct ModelReportView: View {
                                 .font(.caption)
                                 .foregroundStyle(entry.inferred ? .orange : .secondary)
                         }
-                        Text(Self.stamp(entry.date))
-                            .font(.caption).foregroundStyle(.secondary)
-                        if let setpoint = entry.setpoint {
-                            Text(setpointText(setpoint))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .onDelete(perform: deleteEvents)
+            Text(Self.stamp(entry.date))
+                .font(.caption).foregroundStyle(.secondary)
+            if let setpoint = entry.setpoint {
+                Text(setpointText(setpoint))
+                    .font(.caption).foregroundStyle(.secondary)
             }
-        } header: {
-            Text("Events, newest first")
-        } footer: {
-            Text("Everything before the first event counts as nothing running, so an event-free stretch needs no marking. Unlabelled time AFTER an event is attributed to that event — an unrecorded change flattens the passive terms.")
         }
+        .contentShape(Rectangle())
+    }
+
+    /// Translate a listed row back into what the editor needs.
+    private func existing(from entry: Entry) -> EventEditorView.ExistingEvent {
+        let change: EquipmentChange
+        if let cooler = entry.cooler {
+            change = cooler.isOn ? .evaporativeCooler : .off
+        } else {
+            change = EquipmentChange(rawValue: entry.hvac?.mode ?? 0) ?? .off
+        }
+        return EventEditorView.ExistingEvent(
+            change: change, date: entry.date, setpointC: entry.setpoint,
+            cooler: entry.cooler, hvac: entry.hvac)
     }
 
     private func setpointText(_ celsius: Double) -> String {

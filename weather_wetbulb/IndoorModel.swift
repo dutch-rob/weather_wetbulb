@@ -448,6 +448,65 @@ enum IndoorPsychrometrics {
 /// with the cooler never on so its column is all zeros.
 enum LeastSquares {
 
+    /// Sign a coefficient is physically permitted to take.
+    enum SignConstraint {
+        case free
+        case nonNegative
+        case nonPositive
+
+        func violated(by value: Double) -> Bool {
+            switch self {
+            case .free:        return false
+            case .nonNegative: return value < 0
+            case .nonPositive: return value > 0
+            }
+        }
+    }
+
+    /// Least squares subject to sign constraints, by active set.
+    ///
+    /// Some coefficients have signs that physics fixes: a cooler cannot warm a
+    /// house, a heater cannot cool one, conduction cannot flow uphill. Left
+    /// free, whichever of them sits closest to an unexplained residual will
+    /// take the wrong sign to absorb it — which is how a swamp cooler ends up
+    /// fitted as a heater on a day when the model under-credits solar gain.
+    ///
+    /// Each pass drops the worst offender to zero and refits the rest, so the
+    /// error it was absorbing is pushed back onto terms that can legitimately
+    /// carry it. That makes the misfit visible in the baseline or the solar
+    /// term instead of hiding it behind an impossible coefficient.
+    static func fit(x: [[Double]], y: [Double],
+                    constraints: [SignConstraint],
+                    ridge: Double = 1e-6) -> [Double]? {
+        guard let width = x.first?.count, constraints.count == width else {
+            return fit(x: x, y: y, ridge: ridge)
+        }
+        var active = Set<Int>()          // columns forced to zero
+
+        for _ in 0...width {
+            let free = (0..<width).filter { !active.contains($0) }
+            guard !free.isEmpty else { return [Double](repeating: 0, count: width) }
+
+            let reduced = x.map { row in free.map { row[$0] } }
+            guard let solved = fit(x: reduced, y: y, ridge: ridge) else { return nil }
+
+            var beta = [Double](repeating: 0, count: width)
+            for (slot, column) in free.enumerated() { beta[column] = solved[slot] }
+
+            // Drop the single worst violation, not all of them: removing several
+            // at once can eliminate a column that would have been fine once
+            // another was gone.
+            var worst: (column: Int, size: Double)?
+            for column in free where constraints[column].violated(by: beta[column]) {
+                let size = abs(beta[column])
+                if worst == nil || size > worst!.size { worst = (column, size) }
+            }
+            guard let worst else { return beta }
+            active.insert(worst.column)
+        }
+        return nil
+    }
+
     /// Solve (XᵀX + λI)β = Xᵀy. Returns nil if the system is not solvable.
     static func fit(x: [[Double]], y: [Double], ridge: Double = 1e-6) -> [Double]? {
         guard let first = x.first, !y.isEmpty, x.count == y.count else { return nil }
@@ -656,6 +715,39 @@ struct IndoorModel: Sendable, Equatable {
         return count - equipmentOrder.count + offset
     }
 
+    /// What physics permits each temperature coefficient to be.
+    ///
+    /// Only the terms whose direction is genuinely certain are constrained.
+    /// Wind-direction modulation can legitimately be negative — some bearings
+    /// leak less than average — and rain and the baseline are left free.
+    static func temperatureConstraints(_ encoding: WindDirectionEncoding) -> [LeastSquares.SignConstraint] {
+        let infiltrationCount = encoding == .harmonic ? 4 : 9
+        return [.free,          // baseline drift
+                .nonNegative,   // conduction: heat flows toward the outside
+                .nonNegative]   // solar gain warms
+            + [LeastSquares.SignConstraint](repeating: .free, count: infiltrationCount)
+            + [.free,           // rain
+               .nonNegative,    // AC drying costs cooling power
+               .nonNegative,    // cooler pulls toward its supply air
+               .nonNegative,    // vent pulls toward outdoor
+               .nonPositive,    // AC cools
+               .nonNegative]    // heating warms
+    }
+
+    /// The same for the dew point equation.
+    static func dewPointConstraints(_ encoding: WindDirectionEncoding) -> [LeastSquares.SignConstraint] {
+        let infiltrationCount = encoding == .harmonic ? 4 : 9
+        return [.free,          // baseline drift
+                .nonNegative]   // moisture moves toward the outdoor dew point
+            + [LeastSquares.SignConstraint](repeating: .free, count: infiltrationCount)
+            + [.free,           // rain
+               .nonPositive,    // AC condenses moisture out
+               .nonNegative,    // cooler adds moisture toward its supply dew point
+               .nonNegative,    // vent pulls toward outdoor
+               .free,           // AC constant: mostly latent, sign not certain
+               .free]           // heating should not move moisture at all
+    }
+
     // MARK: Fitting
 
     /// Fit both equations on `train` and score on `test`.
@@ -690,8 +782,11 @@ struct IndoorModel: Sendable, Equatable {
 
         let (xT, yT) = assemble(train, temperatureFeatures, temperatureTarget)
         let (xD, yD) = assemble(train, dewPointFeatures, dewPointTarget)
-        guard let betaT = LeastSquares.fit(x: xT, y: yT),
-              let betaD = LeastSquares.fit(x: xD, y: yD) else { return nil }
+        guard let betaT = LeastSquares.fit(x: xT, y: yT,
+                                           constraints: temperatureConstraints(encoding)),
+              let betaD = LeastSquares.fit(x: xD, y: yD,
+                                           constraints: dewPointConstraints(encoding))
+        else { return nil }
 
         let (txT, tyT) = assemble(test, temperatureFeatures, temperatureTarget)
         let (txD, tyD) = assemble(test, dewPointFeatures, dewPointTarget)

@@ -102,6 +102,12 @@ struct ModelReportView: View {
                     Text(r.coilNote).font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if !r.coolerNote.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Cooler saturation")
+                    Text(r.coolerNote).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         } header: {
             Text("Fit")
         } footer: {
@@ -275,7 +281,8 @@ struct ModelReportView: View {
             return
         }
         report = Report(model: selection.model, observations: observations,
-                        coilNote: selection.coilNote)
+                        coilNote: selection.coilNote,
+                        coolerNote: selection.coolerNote)
     }
 
     // MARK: - Report
@@ -285,6 +292,8 @@ struct ModelReportView: View {
         let observations: [IndoorObservation]
         /// How the coil temperature was arrived at, in words.
         var coilNote: String = ""
+        /// The same for the cooler's saturation effectiveness.
+        var coolerNote: String = ""
 
         /// Hours for the passive response to close most of an indoor-outdoor
         /// gap. Only meaningful when conduction came out positive.

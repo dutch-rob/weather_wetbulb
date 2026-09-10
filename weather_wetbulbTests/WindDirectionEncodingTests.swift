@@ -216,7 +216,7 @@ struct WindDirectionEncodingTests {
                 nextIndoorTempC: base.nextIndoorTempC, nextIndoorDewPointC: base.nextIndoorDewPointC,
                 weatherKit: base.weatherKit, station: base.station,
                 solar: base.solar, hvac: state)
-            return IndoorModel.temperatureFeatures(o, OutdoorSourcePlan(all: .station), .harmonic, CoilTemperature())!
+            return IndoorModel.temperatureFeatures(o, OutdoorSourcePlan(all: .station), .harmonic, CoilTemperature(), CoolerEffectiveness())!
         }
         let cooler = features(.evaporativeCooler)
         let vent = features(.vent)
@@ -275,8 +275,8 @@ struct WindDirectionEncodingTests {
                 weatherKit: base.weatherKit, station: base.station,
                 solar: base.solar, hvac: state)
             let plan = OutdoorSourcePlan(all: .station)
-            return (IndoorModel.temperatureFeatures(o, plan, .harmonic, coil)!,
-                    IndoorModel.dewPointFeatures(o, plan, .harmonic, coil)!)
+            return (IndoorModel.temperatureFeatures(o, plan, .harmonic, coil, CoolerEffectiveness())!,
+                    IndoorModel.dewPointFeatures(o, plan, .harmonic, coil, CoolerEffectiveness())!)
         }
         // Latent term sits just before the four equipment slots.
         let tempIndex = { (c: Int) in c - IndoorModel.equipmentOrder.count - 1 }
@@ -321,6 +321,43 @@ struct WindDirectionEncodingTests {
         let refined = IndoorModelEstimator.refineCoil(model: m, train: train, test: test)
         #expect(refined.model.coil == CoilTemperature())
         #expect(refined.note.contains("only 0 AC observations"))
+    }
+
+    @Test func imperfectSaturationLeavesSupplyAirWarmerAndDrier() {
+        // Outdoor 34.6 C, wet bulb 19.7 C, dew point 12.3 C — the measured case.
+        let outdoor = 34.6, wetBulb = 19.67, dewPoint = 12.29
+
+        let perfect = CoolerEffectiveness(fraction: 1.0)
+        // Full saturation delivers air AT the wet bulb, on both counts.
+        #expect(abs(perfect.supplyTemperatureC(outdoorC: outdoor, wetBulbC: wetBulb) - wetBulb) < 1e-9)
+        #expect(abs(perfect.supplyDewPointC(outdoorDewPointC: dewPoint, wetBulbC: wetBulb) - wetBulb) < 1e-9)
+
+        let real = CoolerEffectiveness(fraction: 0.83)
+        let t = real.supplyTemperatureC(outdoorC: outdoor, wetBulbC: wetBulb)
+        let d = real.supplyDewPointC(outdoorDewPointC: dewPoint, wetBulbC: wetBulb)
+        // Warmer than the wet bulb, and matching the 72 F measurement.
+        #expect(t > wetBulb)
+        #expect(abs(t - 22.2) < 0.2)
+        // And DRIER than the wet bulb — the half that is easy to miss, and the
+        // reason the indoor dew point never climbs all the way there.
+        #expect(d < wetBulb)
+        #expect(d > dewPoint)
+        #expect(abs(d - 18.4) < 0.2)
+    }
+
+    @Test func coolerEffectivenessIsNotFittedFromTooFewObservations() {
+        // The default came from measuring the supply air, which beats a handful
+        // of observations, so the search must not take over prematurely.
+        let all = Self.twoFacedHouse(count: 200)
+        let (train, test) = IndoorModelEstimator.split(all)
+        guard let m = IndoorModel.fit(train: train, test: test,
+                                      plan: OutdoorSourcePlan(all: .station),
+                                      encoding: .harmonic) else {
+            #expect(Bool(false)); return
+        }
+        let refined = IndoorModelEstimator.refineCooler(model: m, train: train, test: test)
+        #expect(refined.model.cooler == CoolerEffectiveness())
+        #expect(refined.note.contains("only 0 cooler observations"))
     }
 
     @Test func steppingWorksUnderTheTentBasis() {

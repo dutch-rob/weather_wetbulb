@@ -55,6 +55,43 @@ enum IndoorModelEstimator {
         /// Whether the coil model was estimated from the data or left at its
         /// default, and why.
         var coilNote: String = ""
+        /// The same for the swamp cooler's effectiveness.
+        var coolerNote: String = ""
+    }
+
+    // MARK: - Cooler effectiveness
+
+    /// Cooler observations needed before effectiveness is fitted rather than
+    /// taken from the measured default.
+    static let coolerSearchMinimumObservations = 15
+
+    /// Search the cooler's saturation effectiveness by held-out error.
+    ///
+    /// The default comes from a direct measurement of the supply air, which is
+    /// better evidence than a handful of observations could provide, so the
+    /// search only takes over once there is enough data to beat it.
+    static func refineCooler(model: IndoorModel,
+                             train: [IndoorObservation],
+                             test: [IndoorObservation],
+                             now: Date = .now) -> (model: IndoorModel, note: String) {
+        let rows = (train + test).filter { $0.hvac == .evaporativeCooler }
+        guard rows.count >= coolerSearchMinimumObservations else {
+            return (model, String(format: "assumed %.2f (measured) — only %d cooler observations",
+                                  model.cooler.fraction, rows.count))
+        }
+        var best = model
+        for fraction in stride(from: 0.50, through: 1.00, by: 0.02) {
+            let cooler = CoolerEffectiveness(fraction: fraction)
+            guard let candidate = IndoorModel.fit(train: train, test: test,
+                                                  plan: model.plan, encoding: model.encoding,
+                                                  coil: model.coil, cooler: cooler, now: now)
+            else { continue }
+            if candidate.score < best.score { best = candidate }
+        }
+        let note = best.cooler == model.cooler
+            ? String(format: "assumed %.2f (measured) — no value scored better", model.cooler.fraction)
+            : String(format: "estimated %.2f from %d cooler observations", best.cooler.fraction, rows.count)
+        return (best, note)
     }
 
     // MARK: - Coil temperature
@@ -99,7 +136,7 @@ enum IndoorModelEstimator {
                 guard let candidate = IndoorModel.fit(train: train, test: test,
                                                       plan: model.plan,
                                                       encoding: model.encoding,
-                                                      coil: coil, now: now)
+                                                      coil: coil, cooler: model.cooler, now: now)
                 else { continue }
                 if candidate.score < best.score { best = candidate }
             }
@@ -160,9 +197,12 @@ enum IndoorModelEstimator {
         }
         best?.scoreByEncoding = scores
         if var winner = best {
-            let refined = refineCoil(model: winner.model, train: train, test: test, now: now)
-            winner.model = refined.model
-            winner.coilNote = refined.note
+            let coil = refineCoil(model: winner.model, train: train, test: test, now: now)
+            winner.model = coil.model
+            winner.coilNote = coil.note
+            let cooler = refineCooler(model: winner.model, train: train, test: test, now: now)
+            winner.model = cooler.model
+            winner.coolerNote = cooler.note
             best = winner
         }
         return best

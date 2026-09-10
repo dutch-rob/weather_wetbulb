@@ -103,6 +103,72 @@ struct OutdoorSourcePlan: Equatable, Sendable {
     }
 }
 
+// MARK: - Solar exposure
+
+/// How the sun's DIRECTION enters the model, on top of its height.
+///
+/// The roof term already covers elevation. This covers the walls, whose gain
+/// depends on which way the sun is coming from — and for a house with heavy
+/// west glazing that peak arrives in late afternoon, at low elevation, when the
+/// roof term is fading.
+///
+/// The catch worth remembering: solar azimuth is a deterministic function of
+/// time of day, so these columns are also time-of-day columns and will absorb
+/// any other daily rhythm — cooking, occupancy, habitual equipment use. What
+/// they recover is better described as "when in the day this house gains heat"
+/// than as pure solar exposure.
+enum SolarExposureEncoding: String, CaseIterable, Sendable {
+    /// Roof only: no direction term.
+    case none
+    /// One sine/cosine pair, giving a single most-exposed bearing with the
+    /// least-exposed forced opposite. Two coefficients; the pair's phase says
+    /// which way the house faces the sun.
+    case harmonic
+    /// Eight knots around the compass, assuming no shape. Richer, and eight
+    /// coefficients to pay for.
+    case tentBasis
+
+    /// Columns contributed for one observation.
+    func columns(vertical: Double, azimuthDegrees: Double?) -> [Double] {
+        switch self {
+        case .none:
+            return []
+        case .harmonic:
+            let pair = CircularBasis.harmonicPair(azimuthDegrees)
+            return [vertical * pair.sin, vertical * pair.cos]
+        case .tentBasis:
+            return CircularBasis.tentWeights(azimuthDegrees).map { $0 * vertical }
+        }
+    }
+
+    var columnCount: Int {
+        switch self {
+        case .none:      return 0
+        case .harmonic:  return 2
+        case .tentBasis: return CircularBasis.knotCount
+        }
+    }
+
+    var labels: [String] {
+        switch self {
+        case .none:      return []
+        case .harmonic:  return ["sun from × sin(az)", "sun from × cos(az)"]
+        case .tentBasis: return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+                            .map { "sun from \($0)" }
+        }
+    }
+
+    /// Bearing the house is most exposed to, recovered from a fitted harmonic
+    /// pair. This is the number to sanity-check against what the building
+    /// actually looks like.
+    static func exposureBearing(sinCoefficient: Double, cosCoefficient: Double) -> Double? {
+        guard abs(sinCoefficient) + abs(cosCoefficient) > 1e-9 else { return nil }
+        var degrees = atan2(sinCoefficient, cosCoefficient) * 180 / .pi
+        if degrees < 0 { degrees += 360 }
+        return degrees
+    }
+}
+
 // MARK: - Observations
 
 /// HVAC state over an observation interval. `.unknown` is its own case rather
@@ -179,6 +245,11 @@ struct IndoorObservation: Sendable {
     /// otherwise derived from WeatherKit cloud cover and daylight. Already
     /// normalised to roughly 0…1 by the aligner so one coefficient fits both.
     let solar: Double
+    /// cos(elevation) scaled by clear-sky fraction: what a vertical surface has
+    /// available. Defaulted so callers predating solar exposure still compile.
+    var solarVertical: Double = 0
+    /// Compass bearing of the sun, nil at night.
+    var solarAzimuthDeg: Double?
     let hvac: HVACState
 
     /// Outdoor values under a given plan, variable by variable.
@@ -201,6 +272,53 @@ struct IndoorObservation: Sendable {
             }
         }
         return out
+    }
+}
+
+// MARK: - Circular predictors
+
+/// Encoding for a predictor that lives on a circle — a compass bearing.
+///
+/// Shared by wind direction and solar azimuth because they pose the same
+/// problem: raw degrees put 350 and 10 at opposite ends of the range although
+/// they are nearly the same direction, and the shape of the response is not
+/// known in advance.
+enum CircularBasis {
+    /// Knots, from north, clockwise: N NE E SE S SW W NW.
+    static let knotCount: Int = 8
+
+    /// Weight on each knot for a bearing in degrees, by linear interpolation
+    /// between the two neighbouring knots.
+    ///
+    /// Continuous rather than a lookup table, so it handles any bearing; for
+    /// values on the 22.5-degree compass points it reproduces the familiar
+    /// 1 / 0.5-0.5 pattern exactly.
+    static func tentWeights(_ degrees: Double?) -> [Double] {
+        guard let degrees, degrees.isFinite else {
+            // Direction unknown. Spreading weight evenly keeps the term's total
+            // effect intact — the row contributes the AVERAGE of the knots —
+            // instead of silently zeroing it.
+            return [Double](repeating: 1 / Double(knotCount), count: knotCount)
+        }
+        let spacing = 360.0 / Double(knotCount)
+        var angle = degrees.truncatingRemainder(dividingBy: 360)
+        if angle < 0 { angle += 360 }
+        let position = angle / spacing
+        let lower = Int(position.rounded(.down)) % knotCount
+        let upper = (lower + 1) % knotCount
+        let fraction = position - position.rounded(.down)
+        var weights = [Double](repeating: 0, count: knotCount)
+        weights[lower] += 1 - fraction
+        weights[upper] += fraction
+        return weights
+    }
+
+    /// The sine/cosine pair: one harmonic, so one best direction with its worst
+    /// forced opposite.
+    static func harmonicPair(_ degrees: Double?) -> (sin: Double, cos: Double) {
+        guard let degrees else { return (0, 0) }
+        let radians = degrees * .pi / 180
+        return (sin(radians), cos(radians))
     }
 }
 
@@ -236,7 +354,7 @@ enum WindDirectionEncoding: String, CaseIterable, Sendable {
     case tentBasis
 
     /// Knots, from north, clockwise: N NE E SE S SW W NW.
-    static let knotCount = 8
+    static let knotCount: Int = CircularBasis.knotCount
 
     /// Interpolate a compass bearing.
     ///
@@ -264,24 +382,7 @@ enum WindDirectionEncoding: String, CaseIterable, Sendable {
     /// arbitrary bearings as well as the station's 22.5-degree steps — and for
     /// those steps it reproduces the 1 / 0.5-0.5 pattern exactly.
     static func tentWeights(_ degrees: Double?) -> [Double] {
-        guard let degrees, degrees.isFinite else {
-            // Bearing unknown. Spreading the weight evenly keeps the row's
-            // total wind effect intact — it contributes the AVERAGE of the
-            // eight directional coefficients — instead of silently zeroing the
-            // wind term, which is what leaving the weights empty would do.
-            return [Double](repeating: 1 / Double(knotCount), count: knotCount)
-        }
-        let spacing = 360.0 / Double(knotCount)
-        var angle = degrees.truncatingRemainder(dividingBy: 360)
-        if angle < 0 { angle += 360 }
-        let position = angle / spacing
-        let lower = Int(position.rounded(.down)) % knotCount
-        let upper = (lower + 1) % knotCount
-        let fraction = position - position.rounded(.down)
-        var weights = [Double](repeating: 0, count: knotCount)
-        weights[lower] += 1 - fraction
-        weights[upper] += fraction
-        return weights
+        CircularBasis.tentWeights(degrees)
     }
 }
 
@@ -574,6 +675,8 @@ struct IndoorModel: Sendable, Equatable {
     var coil: CoilTemperature
     /// How completely the swamp cooler saturates its air.
     var cooler: CoolerEffectiveness
+    /// How the sun's direction enters, on top of its height.
+    var exposure: SolarExposureEncoding
     /// Coefficients of the dT_in/dt equation, in `temperatureFeatures` order.
     var temperature: [Double]
     /// Coefficients of the dD_in/dt equation, in `dewPointFeatures` order.
@@ -591,9 +694,44 @@ struct IndoorModel: Sendable, Equatable {
     struct Score: Sendable, Equatable, Comparable {
         var temperatureRMSE: Double
         var dewPointRMSE: Double
+        /// Error scaled by how much each quantity varied, for human reading.
+        /// 1.0 means no better than predicting the average.
         var combined: Double
+        /// Small-sample corrected information criterion on the HELD-OUT slice,
+        /// summed over both equations. Lower is better; this is what model
+        /// selection compares.
+        var criterion: Double
 
-        static func < (a: Score, b: Score) -> Bool { a.combined < b.combined }
+        /// Selection compares the criterion, never the raw error.
+        ///
+        /// Held-out error already discourages overfitting, but not enough on
+        /// its own: with a few dozen validation rows, a model with eight extra
+        /// coefficients can win by chance. The criterion charges for every
+        /// coefficient, so a richer encoding has to earn its keep rather than
+        /// merely tie.
+        static func < (a: Score, b: Score) -> Bool { a.criterion < b.criterion }
+    }
+
+    /// AICc on validation residuals.
+    ///
+    /// Not textbook AIC, which is computed in-sample: here the residuals come
+    /// from data the fit never saw, and the penalty guards against a richer
+    /// model flattering itself on a small validation slice. The small-sample
+    /// correction matters — with 40-odd held-out rows and up to twenty
+    /// coefficients the plain 2k term badly understates the cost.
+    ///
+    /// Coefficients clamped to zero by the sign constraints are not counted:
+    /// they were removed from the fit and contribute nothing.
+    static func informationCriterion(residualSumOfSquares: Double,
+                                     observations n: Int,
+                                     parameters k: Int) -> Double {
+        guard n > 0, residualSumOfSquares > 0 else { return .infinity }
+        // Too many parameters for the validation set to say anything: refuse
+        // rather than return a flattering number.
+        guard n - k - 1 > 0 else { return .infinity }
+        let aic = Double(n) * log(residualSumOfSquares / Double(n)) + 2 * Double(k)
+        let correction = 2 * Double(k) * Double(k + 1) / Double(n - k - 1)
+        return aic + correction
     }
 
     // MARK: Feature construction
@@ -603,7 +741,8 @@ struct IndoorModel: Sendable, Equatable {
                                     _ plan: OutdoorSourcePlan,
                                     _ encoding: WindDirectionEncoding,
                                     _ coil: CoilTemperature,
-                                    _ cooler: CoolerEffectiveness) -> [Double]? {
+                                    _ cooler: CoolerEffectiveness,
+                                    _ exposure: SolarExposureEncoding) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity else { return nil }
         let gap = tOut - o.indoorTempC
@@ -612,6 +751,7 @@ struct IndoorModel: Sendable, Equatable {
             pressureHPa: out.stationPressureHPa) ?? tOut
         let terms = InfiltrationTerms(out)
         return [1, gap, o.solar]
+            + exposure.columns(vertical: o.solarVertical, azimuthDegrees: o.solarAzimuthDeg)
             + terms.scaled(by: gap, encoding: encoding)
             + [terms.rain,
                // Energy spent condensing water is energy not spent lowering
@@ -634,7 +774,8 @@ struct IndoorModel: Sendable, Equatable {
                                  _ plan: OutdoorSourcePlan,
                                  _ encoding: WindDirectionEncoding,
                                  _ coil: CoilTemperature,
-                                 _ cooler: CoolerEffectiveness) -> [Double]? {
+                                 _ cooler: CoolerEffectiveness,
+                                 _ exposure: SolarExposureEncoding) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity,
               let dOut = IndoorPsychrometrics.dewPointC(
@@ -676,7 +817,8 @@ struct IndoorModel: Sendable, Equatable {
 
     /// Human-readable names for `temperature`, in coefficient order.
     var temperatureLabels: [String] {
-        ["baseline drift", "conduction (out − in)", "solar gain"]
+        ["baseline drift", "conduction (out − in)", "solar gain (roof)"]
+            + exposure.labels
             + Self.infiltrationLabels(encoding, gradient: "ΔT")
             + ["rain", "AC dehumidifying", "evaporative cooler",
                "vent (cooler, dry)", "air conditioning", "heating"]
@@ -720,11 +862,23 @@ struct IndoorModel: Sendable, Equatable {
     /// Only the terms whose direction is genuinely certain are constrained.
     /// Wind-direction modulation can legitimately be negative — some bearings
     /// leak less than average — and rain and the baseline are left free.
-    static func temperatureConstraints(_ encoding: WindDirectionEncoding) -> [LeastSquares.SignConstraint] {
+    static func temperatureConstraints(_ encoding: WindDirectionEncoding,
+                                       _ exposure: SolarExposureEncoding = .none) -> [LeastSquares.SignConstraint] {
         let infiltrationCount = encoding == .harmonic ? 4 : 9
+        // Exposure columns are left free for the harmonic pair, whose signs
+        // encode a bearing rather than a direction of effect. The tent knots
+        // are each a real gain and cannot be negative.
+        let exposureConstraints: [LeastSquares.SignConstraint]
+        switch exposure {
+        case .none:      exposureConstraints = []
+        case .harmonic:  exposureConstraints = [.free, .free]
+        case .tentBasis: exposureConstraints = [LeastSquares.SignConstraint](
+                            repeating: .nonNegative, count: CircularBasis.knotCount)
+        }
         return [.free,          // baseline drift
                 .nonNegative,   // conduction: heat flows toward the outside
                 .nonNegative]   // solar gain warms
+            + exposureConstraints
             + [LeastSquares.SignConstraint](repeating: .free, count: infiltrationCount)
             + [.free,           // rain
                .nonNegative,    // AC drying costs cooling power
@@ -760,10 +914,11 @@ struct IndoorModel: Sendable, Equatable {
                     encoding: WindDirectionEncoding = .harmonic,
                     coil: CoilTemperature = CoilTemperature(),
                     cooler: CoolerEffectiveness = CoolerEffectiveness(),
+                    exposure: SolarExposureEncoding = .none,
                     now: Date = .now) -> IndoorModel? {
 
         func assemble(_ rows: [IndoorObservation],
-                      _ features: (IndoorObservation, OutdoorSourcePlan, WindDirectionEncoding, CoilTemperature, CoolerEffectiveness) -> [Double]?,
+                      _ features: (IndoorObservation, OutdoorSourcePlan, WindDirectionEncoding, CoilTemperature, CoolerEffectiveness, SolarExposureEncoding) -> [Double]?,
                       _ target: (IndoorObservation) -> Double) -> ([[Double]], [Double]) {
             var x: [[Double]] = [], y: [Double] = []
             for o in rows {
@@ -772,7 +927,7 @@ struct IndoorModel: Sendable, Equatable {
                 // passive terms, which is exactly the error the label exists to
                 // avoid.
                 guard o.hvac != .unknown else { continue }
-                guard let f = features(o, plan, encoding, coil, cooler) else { continue }
+                guard let f = features(o, plan, encoding, coil, cooler, exposure) else { continue }
                 let t = target(o)
                 guard t.isFinite, f.allSatisfy(\.isFinite) else { continue }
                 x.append(f); y.append(t)
@@ -783,7 +938,7 @@ struct IndoorModel: Sendable, Equatable {
         let (xT, yT) = assemble(train, temperatureFeatures, temperatureTarget)
         let (xD, yD) = assemble(train, dewPointFeatures, dewPointTarget)
         guard let betaT = LeastSquares.fit(x: xT, y: yT,
-                                           constraints: temperatureConstraints(encoding)),
+                                           constraints: temperatureConstraints(encoding, exposure)),
               let betaD = LeastSquares.fit(x: xD, y: yD,
                                            constraints: dewPointConstraints(encoding))
         else { return nil }
@@ -793,6 +948,7 @@ struct IndoorModel: Sendable, Equatable {
         guard let score = score(txT, tyT, betaT, txD, tyD, betaD) else { return nil }
 
         return IndoorModel(plan: plan, encoding: encoding, coil: coil, cooler: cooler,
+                           exposure: exposure,
                            temperature: betaT, dewPoint: betaD,
                            score: score, fittedAt: now,
                            observationCount: xT.count)
@@ -801,11 +957,20 @@ struct IndoorModel: Sendable, Equatable {
     private static func score(_ xT: [[Double]], _ yT: [Double], _ bT: [Double],
                               _ xD: [[Double]], _ yD: [Double], _ bD: [Double]) -> Score? {
         guard let rmseT = rmse(xT, yT, bT), let rmseD = rmse(xD, yD, bD) else { return nil }
+        let usedT = bT.filter { $0 != 0 }.count
+        let usedD = bD.filter { $0 != 0 }.count
+        let criterion = informationCriterion(
+            residualSumOfSquares: rmseT * rmseT * Double(yT.count),
+            observations: yT.count, parameters: usedT)
+            + informationCriterion(
+                residualSumOfSquares: rmseD * rmseD * Double(yD.count),
+                observations: yD.count, parameters: usedD)
         // Normalise by the spread of each target so neither equation dominates
         // just by being measured on a livelier quantity.
         let combined = (rmseT / max(spread(yT), 0.05) + rmseD / max(spread(yD), 0.05)) / 2
         guard combined.isFinite else { return nil }
-        return Score(temperatureRMSE: rmseT, dewPointRMSE: rmseD, combined: combined)
+        return Score(temperatureRMSE: rmseT, dewPointRMSE: rmseD,
+                     combined: combined, criterion: criterion)
     }
 
     private static func rmse(_ x: [[Double]], _ y: [Double], _ beta: [Double]) -> Double? {
@@ -835,8 +1000,8 @@ struct IndoorModel: Sendable, Equatable {
     /// Integrating this repeatedly is how the forecast scenarios are produced:
     /// override `hvac` to ask "what if the cooler were on".
     func step(from o: IndoorObservation, dt: Double) -> (temperatureC: Double, dewPointC: Double)? {
-        guard let fT = Self.temperatureFeatures(o, plan, encoding, coil, cooler),
-              let fD = Self.dewPointFeatures(o, plan, encoding, coil, cooler),
+        guard let fT = Self.temperatureFeatures(o, plan, encoding, coil, cooler, exposure),
+              let fD = Self.dewPointFeatures(o, plan, encoding, coil, cooler, exposure),
               fT.count == temperature.count, fD.count == dewPoint.count else { return nil }
         let rateT = zip(fT, temperature).reduce(0) { $0 + $1.0 * $1.1 }
         let rateD = zip(fD, dewPoint).reduce(0) { $0 + $1.0 * $1.1 }

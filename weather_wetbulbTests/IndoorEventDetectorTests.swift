@@ -217,7 +217,8 @@ struct IndoorEventDetectorTests {
 
         var poor = built.model
         poor.score = IndoorModel.Score(temperatureRMSE: 1, dewPointRMSE: 1,
-                                       combined: IndoorEventDetector.maximumModelScore + 0.01)
+                                       combined: IndoorEventDetector.maximumModelScore + 0.01,
+                                       criterion: 0)
         #expect(IndoorEventDetector.detect(observations: built.rows, model: poor).isEmpty)
     }
 

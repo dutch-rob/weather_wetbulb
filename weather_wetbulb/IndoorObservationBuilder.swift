@@ -105,6 +105,12 @@ enum IndoorObservationBuilder {
                 weatherKit: wk.values,
                 station: stationOut,
                 solar: solar(station: a, weatherKit: wk.point, location: location),
+                solarVertical: verticalSolar(at: a.date, weatherKit: wk.point, location: location),
+                solarAzimuthDeg: location.map {
+                    SolarGeometry.position(date: a.date,
+                                           latitude: $0.coordinate.latitude,
+                                           longitude: $0.coordinate.longitude).azimuthDegrees
+                } ?? nil,
                 hvac: state))
         }
         return out
@@ -172,6 +178,22 @@ enum IndoorObservationBuilder {
         guard span > 0 else { return (a, a, 0) }
         let fraction = date.timeIntervalSince(a.date) / span
         return (a, b, min(max(fraction, 0), 1))
+    }
+
+    /// Clear-sky energy available to a VERTICAL surface at this moment.
+    ///
+    /// Separate from the roof term because the two peak at different times: a
+    /// wall's best moment is when the sun is low and facing it, which is when
+    /// the roof's is worst.
+    static func verticalSolar(at date: Date,
+                              weatherKit: ForecastPoint?,
+                              location: CLLocation?) -> Double {
+        guard let location else { return 0 }
+        let clear = weatherKit.map { min(max(1 - $0.cloudCover, 0), 1) } ?? 1
+        let position = SolarGeometry.position(date: date,
+                                              latitude: location.coordinate.latitude,
+                                              longitude: location.coordinate.longitude)
+        return position.vertical * clear
     }
 
     /// Solar gain proxy on a 0…1 scale.

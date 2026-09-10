@@ -52,6 +52,12 @@ enum IndoorModelEstimator {
         /// Best held-out score reached under each direction encoding, so the
         /// debug screen can show what the alternative would have cost.
         var scoreByEncoding: [WindDirectionEncoding: IndoorModel.Score] = [:]
+        /// Criterion reached under each solar-exposure encoding, so the choice
+        /// is inspectable and the cost of the richer one is visible.
+        var criterionByExposure: [SolarExposureEncoding: Double] = [:]
+        /// Bearing the house appears most exposed to, when a harmonic exposure
+        /// was fitted. Worth checking against the actual building.
+        var exposureBearing: Double?
         /// Whether the coil model was estimated from the data or left at its
         /// default, and why.
         var coilNote: String = ""
@@ -94,7 +100,8 @@ enum IndoorModelEstimator {
             let cooler = CoolerEffectiveness(fraction: fraction)
             guard let candidate = IndoorModel.fit(train: train, test: test,
                                                   plan: model.plan, encoding: model.encoding,
-                                                  coil: model.coil, cooler: cooler, now: now)
+                                                  coil: model.coil, cooler: cooler,
+                                                  exposure: model.exposure, now: now)
             else { continue }
             if candidate.score < best.score { best = candidate }
         }
@@ -158,7 +165,8 @@ enum IndoorModelEstimator {
                 guard let candidate = IndoorModel.fit(train: train, test: test,
                                                       plan: model.plan,
                                                       encoding: model.encoding,
-                                                      coil: coil, cooler: model.cooler, now: now)
+                                                      coil: coil, cooler: model.cooler,
+                                                  exposure: model.exposure, now: now)
                 else { continue }
                 if candidate.score < best.score { best = candidate }
             }
@@ -197,27 +205,39 @@ enum IndoorModelEstimator {
         var best: Selection?
         var scores: [WindDirectionEncoding: IndoorModel.Score] = [:]
 
+        var byExposure: [SolarExposureEncoding: Double] = [:]
+
+        // Every combination of the two circular encodings. The information
+        // criterion decides: a richer encoding must pay for its coefficients,
+        // so no ad-hoc margin is needed to stop the search buying complexity
+        // that changes nothing.
         for encoding in WindDirectionEncoding.allCases {
-            guard let candidate = selectSources(train: train, test: test,
-                                                encoding: encoding,
-                                                maxPasses: maxPasses, now: now)
-            else { continue }
-            scores[encoding] = candidate.model.score
-            // Prefer the SIMPLER encoding unless the richer one is better by a
-            // margin that means something. Encodings are tried cheapest-first,
-            // and with no wind direction in the data the tent basis collapses
-            // to exactly the harmonic's undirected term — identical fits that
-            // differ only in ridge rounding. Without this the search would
-            // carry eight coefficients to buy nothing.
-            if let current = best {
-                if candidate.model.score.combined < current.model.score.combined * (1 - meaningfulImprovement) {
+            for exposure in SolarExposureEncoding.allCases {
+                guard let candidate = selectSources(train: train, test: test,
+                                                    encoding: encoding, exposure: exposure,
+                                                    maxPasses: maxPasses, now: now)
+                else { continue }
+                let criterion = candidate.model.score.criterion
+                if scores[encoding] == nil || candidate.model.score < scores[encoding]! {
+                    scores[encoding] = candidate.model.score
+                }
+                if byExposure[exposure] == nil || criterion < byExposure[exposure]! {
+                    byExposure[exposure] = criterion
+                }
+                if best == nil || candidate.model.score < best!.model.score {
                     best = candidate
                 }
-            } else {
-                best = candidate
             }
         }
         best?.scoreByEncoding = scores
+        best?.criterionByExposure = byExposure
+        if let winner = best, winner.model.exposure == .harmonic,
+           winner.model.temperature.count > 4 {
+            // Exposure columns sit at indices 3 and 4: sin then cos.
+            best?.exposureBearing = SolarExposureEncoding.exposureBearing(
+                sinCoefficient: winner.model.temperature[3],
+                cosCoefficient: winner.model.temperature[4])
+        }
         if var winner = best {
             let coil = refineCoil(model: winner.model, train: train, test: test, now: now)
             winner.model = coil.model
@@ -240,6 +260,7 @@ enum IndoorModelEstimator {
     static func selectSources(train: [IndoorObservation],
                               test: [IndoorObservation],
                               encoding: WindDirectionEncoding = .harmonic,
+                              exposure: SolarExposureEncoding = .none,
                               maxPasses: Int = 7,
                               now: Date = .now) -> Selection? {
         guard !train.isEmpty, !test.isEmpty else { return nil }
@@ -247,9 +268,9 @@ enum IndoorModelEstimator {
         let wkPlan = OutdoorSourcePlan(all: .weatherKit)
         let stationPlan = OutdoorSourcePlan(all: .station)
         let wkModel = IndoorModel.fit(train: train, test: test, plan: wkPlan,
-                                      encoding: encoding, now: now)
+                                      encoding: encoding, exposure: exposure, now: now)
         let stationModel = IndoorModel.fit(train: train, test: test, plan: stationPlan,
-                                           encoding: encoding, now: now)
+                                           encoding: encoding, exposure: exposure, now: now)
 
         // Start from whichever whole-source fit is better.
         var best: IndoorModel
@@ -269,7 +290,7 @@ enum IndoorModelEstimator {
                 let candidatePlan = best.plan.swapping(v)
                 guard let candidate = IndoorModel.fit(
                     train: train, test: test, plan: candidatePlan,
-                    encoding: encoding, now: now) else { continue }
+                    encoding: encoding, exposure: exposure, now: now) else { continue }
                 // Strictly better only: an equal score means the swap bought
                 // nothing, and flipping anyway would let the search oscillate.
                 if candidate.score < best.score {

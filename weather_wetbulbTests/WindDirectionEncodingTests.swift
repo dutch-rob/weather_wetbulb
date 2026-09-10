@@ -216,7 +216,7 @@ struct WindDirectionEncodingTests {
                 nextIndoorTempC: base.nextIndoorTempC, nextIndoorDewPointC: base.nextIndoorDewPointC,
                 weatherKit: base.weatherKit, station: base.station,
                 solar: base.solar, hvac: state)
-            return IndoorModel.temperatureFeatures(o, OutdoorSourcePlan(all: .station), .harmonic, CoilTemperature(), CoolerEffectiveness())!
+            return IndoorModel.temperatureFeatures(o, OutdoorSourcePlan(all: .station), .harmonic, CoilTemperature(), CoolerEffectiveness(), .none)!
         }
         let cooler = features(.evaporativeCooler)
         let vent = features(.vent)
@@ -275,8 +275,8 @@ struct WindDirectionEncodingTests {
                 weatherKit: base.weatherKit, station: base.station,
                 solar: base.solar, hvac: state)
             let plan = OutdoorSourcePlan(all: .station)
-            return (IndoorModel.temperatureFeatures(o, plan, .harmonic, coil, CoolerEffectiveness())!,
-                    IndoorModel.dewPointFeatures(o, plan, .harmonic, coil, CoolerEffectiveness())!)
+            return (IndoorModel.temperatureFeatures(o, plan, .harmonic, coil, CoolerEffectiveness(), .none)!,
+                    IndoorModel.dewPointFeatures(o, plan, .harmonic, coil, CoolerEffectiveness(), .none)!)
         }
         // Latent term sits just before the four equipment slots.
         let tempIndex = { (c: Int) in c - IndoorModel.equipmentOrder.count - 1 }

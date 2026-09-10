@@ -103,6 +103,13 @@ struct ModelReportView: View {
                     Text(r.coilNote).font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if let bearing = r.exposureBearing {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Most sun-exposed side")
+                    Text(String(format: "%.0f° — %@", bearing, Self.compassName(bearing)))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if !r.coolerNote.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Cooler saturation")
@@ -307,7 +314,8 @@ struct ModelReportView: View {
         }
         report = Report(model: selection.model, observations: observations,
                         coilNote: selection.coilNote,
-                        coolerNote: selection.coolerNote)
+                        coolerNote: selection.coolerNote,
+                        exposureBearing: selection.exposureBearing)
         // Rewrite the bundle here, not on appear. Writing it once when the
         // screen opened meant that adding an event refreshed the report but
         // left Export sharing the snapshot taken beforehand — silently missing
@@ -324,6 +332,8 @@ struct ModelReportView: View {
         var coilNote: String = ""
         /// The same for the cooler's saturation effectiveness.
         var coolerNote: String = ""
+        /// Bearing the house appears most exposed to, when one was fitted.
+        var exposureBearing: Double?
 
         /// Hours for the passive response to close most of an indoor-outdoor
         /// gap. Only meaningful when conduction came out positive.
@@ -425,6 +435,16 @@ struct ModelReportView: View {
         case .rainfall:      return "rainfall"
         case .pressure:      return "pressure"
         }
+    }
+
+    /// Nearest compass point, so the fitted bearing can be checked against the
+    /// building at a glance.
+    static func compassName(_ degrees: Double) -> String {
+        let points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                      "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+        var angle = degrees.truncatingRemainder(dividingBy: 360)
+        if angle < 0 { angle += 360 }
+        return points[Int((angle / 22.5).rounded()) % points.count]
     }
 
     static func stamp(_ date: Date) -> String {

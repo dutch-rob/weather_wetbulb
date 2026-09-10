@@ -63,6 +63,47 @@ struct IndoorModelTests {
         #expect(LeastSquares.fit(x: x, y: [1, 2]) == nil)
     }
 
+    // MARK: - Information criterion
+
+    @Test func theCriterionChargesForExtraCoefficients() {
+        // Same fit quality, more parameters: the richer model must score worse,
+        // which is what stops an eight-knot encoding being adopted for nothing.
+        let lean = IndoorModel.informationCriterion(
+            residualSumOfSquares: 10, observations: 40, parameters: 5)
+        let rich = IndoorModel.informationCriterion(
+            residualSumOfSquares: 10, observations: 40, parameters: 13)
+        #expect(rich > lean)
+    }
+
+    @Test func theCriterionStillPrefersAGenuinelyBetterFit() {
+        // Extra coefficients are worth paying for when they actually explain
+        // something.
+        let lean = IndoorModel.informationCriterion(
+            residualSumOfSquares: 40, observations: 40, parameters: 5)
+        let rich = IndoorModel.informationCriterion(
+            residualSumOfSquares: 8, observations: 40, parameters: 13)
+        #expect(rich < lean)
+    }
+
+    @Test func theCriterionRefusesModelsTooLargeForTheValidationSet() {
+        // With more parameters than validation rows the correction blows up and
+        // the number would flatter rather than inform, so it is rejected.
+        #expect(IndoorModel.informationCriterion(
+            residualSumOfSquares: 10, observations: 12, parameters: 12) == .infinity)
+    }
+
+    @Test func exposureBearingRecoversTheDirectionFromTheHarmonicPair() {
+        // A pure sine component means the house faces east (90 degrees).
+        #expect(abs(SolarExposureEncoding.exposureBearing(
+            sinCoefficient: 1, cosCoefficient: 0)! - 90) < 1e-6)
+        // Pure negative sine means west, the case that matters here.
+        #expect(abs(SolarExposureEncoding.exposureBearing(
+            sinCoefficient: -1, cosCoefficient: 0)! - 270) < 1e-6)
+        // Nothing fitted, no bearing to claim.
+        #expect(SolarExposureEncoding.exposureBearing(
+            sinCoefficient: 0, cosCoefficient: 0) == nil)
+    }
+
     // MARK: - Sign constraints
 
     @Test func constrainedFitRefusesAPhysicallyImpossibleSign() {

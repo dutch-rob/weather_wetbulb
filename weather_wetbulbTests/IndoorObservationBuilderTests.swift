@@ -302,6 +302,44 @@ struct IndoorObservationBuilderTests {
         #expect(noon(month: 12) < noon(month: 6))
     }
 
+    @Test func aWestFacingWallPeaksInTheAfternoonNotAtNoon() {
+        // The whole point of adding azimuth: a vertical surface's best moment
+        // is when the sun faces it, which for a west wall is late afternoon at
+        // LOW elevation — exactly when the roof term is fading.
+        let lat = 35.3, lon = -111.66
+        func position(hourUTC: Int) -> SolarGeometry.Position {
+            var c = DateComponents()
+            c.year = 2026; c.month = 9; c.day = 10; c.hour = hourUTC
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = TimeZone(secondsFromGMT: 0)!
+            return SolarGeometry.position(date: cal.date(from: c)!,
+                                          latitude: lat, longitude: lon)
+        }
+        // Local noon here is about 19:00 UTC; late afternoon about 24:00 UTC.
+        let noon = position(hourUTC: 19)
+        let afternoon = position(hourUTC: 23)
+
+        // Roof gain falls away through the afternoon...
+        #expect(afternoon.horizontal < noon.horizontal)
+        // ...while a wall has MORE to work with, the sun being lower.
+        #expect(afternoon.vertical > noon.vertical)
+
+        // And the sun has swung west: about south at noon, well past it later.
+        #expect(abs(noon.azimuthDegrees! - 180) < 25)
+        #expect(afternoon.azimuthDegrees! > 230)
+    }
+
+    @Test func theSunHasNoBearingAtNight() {
+        var c = DateComponents()
+        c.year = 2026; c.month = 9; c.day = 10; c.hour = 8   // ~1am local
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let night = SolarGeometry.position(date: cal.date(from: c)!,
+                                           latitude: 35.3, longitude: -111.66)
+        #expect(night.horizontal == 0)
+        #expect(night.azimuthDegrees == nil)
+    }
+
     // MARK: - Rainfall
 
     @Test func rainfallBecomesTheIncrementAcrossTheInterval() {

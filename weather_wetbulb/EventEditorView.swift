@@ -91,6 +91,7 @@ struct EventEditorView: View {
     @State private var date = Date()
     @State private var hasSetpoint = false
     @State private var setpoint: Double = 22
+    @State private var saveError: String?
 
     /// Setpoints are picked in whichever unit the rest of the app is showing,
     /// and converted on the way into the store, which is always Celsius.
@@ -144,6 +145,11 @@ struct EventEditorView: View {
                     }
                 }
             }
+            .alert("Could not save", isPresented: .constant(saveError != nil)) {
+                Button("OK") { saveError = nil }
+            } message: {
+                Text(saveError ?? "")
+            }
             .navigationTitle("Add event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -168,7 +174,15 @@ struct EventEditorView: View {
             celsius = useFahrenheit ? (setpoint - 32) * 5 / 9 : setpoint
         }
         change.record(at: date, setpointC: celsius, context: context)
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            // Never fail silently: an event that looks recorded but is not
+            // mislabels every reading after it, and the mistake only surfaces
+            // much later as a model that will not fit.
+            saveError = error.localizedDescription
+            return
+        }
         dismiss()
     }
 }

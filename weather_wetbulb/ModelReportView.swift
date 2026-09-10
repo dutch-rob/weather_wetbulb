@@ -71,10 +71,7 @@ struct ModelReportView: View {
                 }
             }
         }
-        .task {
-            await build()
-            exportFile = writeExport()
-        }
+        .task { await build() }
         .sheet(isPresented: $addingEvent, onDismiss: { Task { await build() } }) {
             EventEditorView()
         }
@@ -278,11 +275,17 @@ struct ModelReportView: View {
         let (train, test) = IndoorModelEstimator.split(observations)
         guard let selection = IndoorModelEstimator.selectModel(train: train, test: test) else {
             report = nil
+            exportFile = writeExport()
             return
         }
         report = Report(model: selection.model, observations: observations,
                         coilNote: selection.coilNote,
                         coolerNote: selection.coolerNote)
+        // Rewrite the bundle here, not on appear. Writing it once when the
+        // screen opened meant that adding an event refreshed the report but
+        // left Export sharing the snapshot taken beforehand — silently missing
+        // the very event just recorded.
+        exportFile = writeExport()
     }
 
     // MARK: - Report

@@ -64,6 +64,8 @@ enum IndoorModelEstimator {
     /// Cooler observations needed before effectiveness is fitted rather than
     /// taken from the measured default.
     static let coolerSearchMinimumObservations = 15
+    /// Plausible saturation effectiveness for a working wet pad.
+    static let coolerEffectivenessRange: ClosedRange<Double> = 0.70...0.95
 
     /// Search the cooler's saturation effectiveness by held-out error.
     ///
@@ -79,8 +81,16 @@ enum IndoorModelEstimator {
             return (model, String(format: "assumed %.2f (measured) — only %d cooler observations",
                                   model.cooler.fraction, rows.count))
         }
+        // Search only the physically plausible band. A direct evaporative
+        // cooler with wet pads runs 0.70–0.95; anything much below that is a
+        // dry or failed pad, which is the "vent" state, not this one. Left
+        // unbounded the search will happily walk down to a broken-cooler value
+        // to soak up error that belongs elsewhere — on a day when the outdoor
+        // temperature climbs 10 °C while the cooler runs, "the cooler works
+        // badly" and "solar gain is under-credited" fit almost equally well.
         var best = model
-        for fraction in stride(from: 0.50, through: 1.00, by: 0.02) {
+        for fraction in stride(from: coolerEffectivenessRange.lowerBound,
+                               through: coolerEffectivenessRange.upperBound, by: 0.01) {
             let cooler = CoolerEffectiveness(fraction: fraction)
             guard let candidate = IndoorModel.fit(train: train, test: test,
                                                   plan: model.plan, encoding: model.encoding,
@@ -88,9 +98,21 @@ enum IndoorModelEstimator {
             else { continue }
             if candidate.score < best.score { best = candidate }
         }
-        let note = best.cooler == model.cooler
-            ? String(format: "assumed %.2f (measured) — no value scored better", model.cooler.fraction)
-            : String(format: "estimated %.2f from %d cooler observations", best.cooler.fraction, rows.count)
+        var note: String
+        if best.cooler == model.cooler {
+            note = String(format: "assumed %.2f (measured) — no value scored better", model.cooler.fraction)
+        } else {
+            note = String(format: "estimated %.2f from %d cooler observations",
+                          best.cooler.fraction, rows.count)
+        }
+        // A result sitting on the edge means the search wanted to leave the
+        // plausible band, which says the cooler term is absorbing error from
+        // somewhere else rather than that the pads are unusual.
+        let edge = 0.005
+        if abs(best.cooler.fraction - coolerEffectivenessRange.lowerBound) < edge
+            || abs(best.cooler.fraction - coolerEffectivenessRange.upperBound) < edge {
+            note += " — at the edge of the plausible range, so treat it with suspicion"
+        }
         return (best, note)
     }
 

@@ -513,10 +513,12 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showModelReport) {
-            // The same location the forecast series was fetched for, so the
-            // sun geometry and the weather describe one place.
+            // The place on screen, used only when no home is marked; with a
+            // monitored home the model screen uses the home's own position and
+            // weather instead.
             ModelReportView(series: weather.seriesFull,
-                            location: selectedPlace?.clLocation ?? locationProvider.currentLocation)
+                            location: selectedPlace?.clLocation ?? locationProvider.currentLocation,
+                            places: places)
         }
     }
 }

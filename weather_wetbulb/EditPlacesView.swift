@@ -29,7 +29,16 @@ struct EditPlacesView: View {
                         showEditor   = true
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(place.name)
+                            HStack(spacing: 6) {
+                                Text(place.name)
+                                if place.indoorMonitoring {
+                                    Text("Home")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6).padding(.vertical, 1)
+                                        .background(.tint.opacity(0.15), in: Capsule())
+                                        .foregroundStyle(.tint)
+                                }
+                            }
                             Text(String(format: "%.4f, %.4f", place.latitude, place.longitude))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -73,6 +82,7 @@ struct EditPlaceView: View {
     @State private var centerCoordinate: CLLocationCoordinate2D? = nil
     @State private var placeName: String = ""
     @State private var isGeocoding = false
+    @State private var isMonitoredHome = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -110,6 +120,16 @@ struct EditPlaceView: View {
                     .textFieldStyle(.roundedBorder)
             }
             .padding(.horizontal)
+
+            Toggle(isOn: $isMonitoredHome) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Monitored home")
+                    Text("The indoor model uses this place's position and weather, whichever place is on screen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
             .padding(.bottom, 8)
 
             // "Add place" button removed — saving is done via the toolbar Save button.
@@ -145,6 +165,7 @@ struct EditPlaceView: View {
         .onAppear {
             if let place = existingPlace {
                 placeName    = place.name
+                isMonitoredHome = place.indoorMonitoring
                 mapPosition  = .region(MKCoordinateRegion(
                     center: place.coordinate,
                     span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)))
@@ -153,10 +174,17 @@ struct EditPlaceView: View {
     }
 
     private func commitSave(name: String, coordinate: CLLocationCoordinate2D) {
+        let id: UUID
         if let place = existingPlace {
             viewModel.update(place, name: name, coordinate: coordinate)
+            id = place.id
         } else {
-            viewModel.addPlace(name: name, coordinate: coordinate)
+            id = viewModel.addPlace(name: name, coordinate: coordinate)
+        }
+        if isMonitoredHome {
+            viewModel.setMonitoredHome(id)          // also clears any previous home
+        } else if existingPlace?.indoorMonitoring == true {
+            viewModel.setMonitoredHome(nil)         // this was the home; now nothing is
         }
     }
 

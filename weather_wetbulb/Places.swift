@@ -165,8 +165,26 @@ final class PlacesViewModel: ObservableObject {
         }
     }
 
-    func addPlace(name: String, coordinate: CLLocationCoordinate2D) {
-        places.append(Place(name: name, latitude: coordinate.latitude, longitude: coordinate.longitude))
+    /// Add a place and return its identity, so a caller can go on to mark it.
+    @discardableResult
+    func addPlace(name: String, coordinate: CLLocationCoordinate2D) -> UUID {
+        let place = Place(name: name, latitude: coordinate.latitude, longitude: coordinate.longitude)
+        places.append(place)
+        save()
+        return place.id
+    }
+
+    /// The place whose indoor climate is modelled, if one has been marked.
+    ///
+    /// The model belongs to a house, not to whatever happens to be on screen:
+    /// its sun geometry and its weather history must describe the house even
+    /// while someone travelling looks at the forecast somewhere else.
+    var monitoredHome: Place? { places.first(where: \.indoorMonitoring) }
+
+    /// Mark one place as the monitored home, clearing the mark from any other,
+    /// or clear it everywhere with nil. There is one station, so one home.
+    func setMonitoredHome(_ id: UUID?) {
+        for i in places.indices { places[i].indoorMonitoring = (places[i].id == id) }
         save()
     }
 

@@ -26,6 +26,12 @@ struct ModelReportView: View {
     /// back to cloud cover alone — which every fit did until this was passed
     /// in, because nothing supplied it.
     var location: CLLocation? = nil
+    /// Saved places, to find the monitored home.
+    @ObservedObject var places: PlacesViewModel
+
+    /// The home's own forecast and history, fetched only when the home is not
+    /// the place on screen — the series passed in then describes somewhere else.
+    @StateObject private var homeWeather = WeatherService()
 
     @Environment(\.modelContext) private var context
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit = false
@@ -53,6 +59,7 @@ struct ModelReportView: View {
                         // is most useful before the readings arrive, not after,
                         // and a full-screen placeholder would block the only
                         // way to record what the equipment is doing.
+                        homeSection
                         if let report {
                             fitSection(report)
                             equipmentSection(report)
@@ -79,7 +86,19 @@ struct ModelReportView: View {
                 }
             }
         }
-        .task { await build() }
+        .task {
+            if needsOwnWeather, let home {
+                await homeWeather.loadFor(location: home.clLocation)
+            }
+            await build()
+        }
+        // History arrives in a second request after the forecast, and it is the
+        // part that overlaps the station readings, so refit when it lands. A
+        // failed history load is silent, which is why the first fit does not
+        // wait for it.
+        .onChange(of: homeWeather.hasHistory) { _, arrived in
+            if arrived { Task { await build() } }
+        }
         .sheet(isPresented: $addingEvent, onDismiss: { Task { await build() } }) {
             EventEditorView()
         }
@@ -88,7 +107,50 @@ struct ModelReportView: View {
         }
     }
 
+    // MARK: - Where the model applies
+
+    private var home: Place? { places.monitoredHome }
+
+    /// True when the home is not the place on screen, so its weather must be
+    /// fetched separately rather than borrowed from the main screen.
+    private var needsOwnWeather: Bool {
+        guard let home else { return false }
+        guard let shown = location else { return true }
+        return shown.distance(from: home.clLocation) > IndoorFeedSource.matchRadius
+    }
+
+    /// The home's position when one is marked, else the place on screen.
+    private var modelLocation: CLLocation? { home?.clLocation ?? location }
+
+    /// Weather describing the same place as `modelLocation`.
+    private var modelSeries: [ForecastPoint] { needsOwnWeather ? homeWeather.seriesFull : series }
+
     // MARK: - Sections
+
+    private var homeSection: some View {
+        Section {
+            if let home {
+                row("Modelling", home.name)
+                if needsOwnWeather && !homeWeather.hasHistory {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Fetching \(home.name)'s weather history…")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if home.altitude == 0 {
+                    Text("This place has no altitude recorded, so WeatherKit's pressure is treated as sea level. That skews wet bulb for a house at elevation.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No home marked")
+                    Text("Using the place on screen. To model your home at its own position and weather wherever you are, open Places, then Edit places, and turn on Monitored home.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
 
     private func fitSection(_ r: Report) -> some View {
         Section {
@@ -310,9 +372,9 @@ struct ModelReportView: View {
         defer { hasBuilt = true }
         let readings = IndoorFeedStore.history(source: .vevorStation, context: context)
         let observations = IndoorObservationBuilder.build(
-            readings: readings, weather: series,
+            readings: readings, weather: modelSeries,
             coolerEvents: coolerEvents, hvacEvents: hvacEvents,
-            location: location)
+            location: modelLocation)
         let (train, test) = IndoorModelEstimator.split(observations)
         guard let selection = IndoorModelEstimator.selectModel(train: train, test: test) else {
             report = nil
@@ -383,10 +445,10 @@ struct ModelReportView: View {
     private func writeExport() -> URL? {
         ModelExport.build(readings: IndoorFeedStore.history(source: .vevorStation,
                                                             context: context),
-                          weather: series,
+                          weather: modelSeries,
                           coolerEvents: coolerEvents,
                           hvacEvents: hvacEvents,
-                          location: location,
+                          location: modelLocation,
                           model: report?.model).write()
     }
 

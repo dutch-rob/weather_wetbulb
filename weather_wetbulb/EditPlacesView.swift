@@ -83,6 +83,9 @@ struct EditPlaceView: View {
     @State private var placeName: String = ""
     @State private var isGeocoding = false
     @State private var isMonitoredHome = false
+    @State private var altitudeText = ""
+    @State private var lookingUpAltitude = false
+    @State private var altitudeNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -118,6 +121,38 @@ struct EditPlaceView: View {
                     .foregroundStyle(.secondary)
                 TextField("Name (leave empty to auto-fill)", text: $placeName)
                     .textFieldStyle(.roundedBorder)
+            }
+            .padding(.horizontal)
+
+            // Altitude matters because WeatherKit reports pressure reduced to
+            // sea level. Left at zero, wet bulb comes out about half a degree
+            // too high for a house at 1000 m.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("altitude:")
+                        .foregroundStyle(.secondary)
+                    TextField("metres", text: $altitudeText)
+                        .keyboardType(.numbersAndPunctuation)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 110)
+                    Text("m").foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        Task { await lookUpAltitude() }
+                    } label: {
+                        if lookingUpAltitude {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Look up")
+                        }
+                    }
+                    .disabled(centerCoordinate == nil || lookingUpAltitude)
+                }
+                if let altitudeNote {
+                    Text(altitudeNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal)
 
@@ -166,6 +201,7 @@ struct EditPlaceView: View {
             if let place = existingPlace {
                 placeName    = place.name
                 isMonitoredHome = place.indoorMonitoring
+                altitudeText = place.altitude == 0 ? "" : String(format: "%.0f", place.altitude)
                 mapPosition  = .region(MKCoordinateRegion(
                     center: place.coordinate,
                     span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)))
@@ -173,13 +209,35 @@ struct EditPlaceView: View {
         }
     }
 
+    /// Ask the USGS elevation service for the pin's ground height.
+    ///
+    /// Coverage is the United States; anywhere else the service reports no
+    /// data, and the field is left for the user to fill in by hand.
+    private func lookUpAltitude() async {
+        guard let coord = centerCoordinate else { return }
+        lookingUpAltitude = true
+        altitudeNote = nil
+        defer { lookingUpAltitude = false }
+        do {
+            let metres = try await ElevationLookup.metres(latitude: coord.latitude,
+                                                          longitude: coord.longitude)
+            altitudeText = String(format: "%.0f", metres)
+            altitudeNote = String(format: "USGS ground elevation: %.1f m", metres)
+        } catch {
+            altitudeNote = error.localizedDescription
+        }
+    }
+
     private func commitSave(name: String, coordinate: CLLocationCoordinate2D) {
+        // An empty field leaves the stored altitude untouched rather than
+        // resetting it to zero.
+        let altitude = Double(altitudeText.trimmingCharacters(in: .whitespaces))
         let id: UUID
         if let place = existingPlace {
-            viewModel.update(place, name: name, coordinate: coordinate)
+            viewModel.update(place, name: name, coordinate: coordinate, altitude: altitude)
             id = place.id
         } else {
-            id = viewModel.addPlace(name: name, coordinate: coordinate)
+            id = viewModel.addPlace(name: name, coordinate: coordinate, altitude: altitude ?? 0)
         }
         if isMonitoredHome {
             viewModel.setMonitoredHome(id)          // also clears any previous home

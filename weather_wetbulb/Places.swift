@@ -167,8 +167,10 @@ final class PlacesViewModel: ObservableObject {
 
     /// Add a place and return its identity, so a caller can go on to mark it.
     @discardableResult
-    func addPlace(name: String, coordinate: CLLocationCoordinate2D) -> UUID {
-        let place = Place(name: name, latitude: coordinate.latitude, longitude: coordinate.longitude)
+    func addPlace(name: String, coordinate: CLLocationCoordinate2D,
+                  altitude: Double = 0) -> UUID {
+        let place = Place(name: name, latitude: coordinate.latitude,
+                          longitude: coordinate.longitude, altitude: altitude)
         places.append(place)
         save()
         return place.id
@@ -205,11 +207,15 @@ final class PlacesViewModel: ObservableObject {
         save()
     }
 
-    func update(_ place: Place, name: String, coordinate: CLLocationCoordinate2D) {
+    /// Update a place. `altitude` nil leaves the stored height alone, so a
+    /// rename never discards an elevation that was looked up earlier.
+    func update(_ place: Place, name: String, coordinate: CLLocationCoordinate2D,
+                altitude: Double? = nil) {
         guard let idx = places.firstIndex(where: { $0.id == place.id }) else { return }
         places[idx].name      = name
         places[idx].latitude  = coordinate.latitude
         places[idx].longitude = coordinate.longitude
+        if let altitude { places[idx].altitude = altitude }
         save()
     }
 

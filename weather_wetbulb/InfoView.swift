@@ -87,6 +87,7 @@ struct InfoView: View {
                         Text("1. This app is free and open source. You can find the open source of the app on GitHub:")
                         Link("https://github.com/dutch-rob/weather_wetbulb", destination: URL(string: "https://github.com/dutch-rob/weather_wetbulb")!)
                         Text("2. You are quite welcome to provide any feedback in your review comments in the App Store, or go to GitHub and provide your comments there. Perhaps you even want to do a pull request for improvements of the code. If you found that something went wrong, please specify.")
+                        Text("3. Tapping \"Look up\" beside a place's altitude sends that place's coordinate to the USGS Elevation Point Query Service (epqs.nationalmap.gov) and reads back the ground elevation. It happens only when you tap it, and nothing else is sent. Altitude matters because Apple Weather reports air pressure reduced to sea level: without a height for the place, the wet-bulb temperature comes out too high for a house up in the hills — about half a degree at 1000 metres. USGS coverage is the United States; elsewhere, type the altitude in yourself.")
                     }
                 }
 

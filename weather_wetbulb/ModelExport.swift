@@ -20,6 +20,7 @@
 
 import Foundation
 import SwiftData
+import CoreLocation
 
 struct ModelExport: Codable {
 
@@ -137,6 +138,12 @@ struct ModelExport: Codable {
     var exportedAt: Date
     /// e.g. "1.2 (7)".
     var appVersion: String
+    /// Where the house is, as used for sun geometry. Nil means the fit ran
+    /// without any, and an offline refit must then do the same rather than
+    /// substitute a location of its own.
+    var latitude: Double?
+    var longitude: Double?
+    var altitude: Double?
     /// Thresholds the aligner used, so an offline refit does not have to guess
     /// them or silently drift from the app's.
     var maxPairIntervalSeconds: Double
@@ -154,6 +161,7 @@ struct ModelExport: Codable {
                       weather: [ForecastPoint],
                       coolerEvents: [CoolerEvent],
                       hvacEvents: [HVACEvent],
+                      location: CLLocation?,
                       model: IndoorModel?) -> ModelExport {
         var events: [Event] = coolerEvents.map {
             Event(date: $0.date, kind: "cooler", mode: nil, isOn: $0.isOn,
@@ -168,6 +176,9 @@ struct ModelExport: Codable {
         return ModelExport(
             exportedAt: Date(),
             appVersion: BuildInfo.versionString,
+            latitude: location?.coordinate.latitude,
+            longitude: location?.coordinate.longitude,
+            altitude: location?.altitude,
             maxPairIntervalSeconds: IndoorObservationBuilder.maxPairInterval,
             minPairIntervalSeconds: IndoorObservationBuilder.minPairInterval,
             testFraction: IndoorModelEstimator.testFraction,

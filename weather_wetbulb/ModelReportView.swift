@@ -17,10 +17,15 @@
 
 import SwiftUI
 import SwiftData
+import CoreLocation
 
 struct ModelReportView: View {
     /// WeatherKit series to align the station readings against.
     let series: [ForecastPoint]
+    /// Where the house is, for sun geometry. Without it the solar terms fall
+    /// back to cloud cover alone — which every fit did until this was passed
+    /// in, because nothing supplied it.
+    var location: CLLocation? = nil
 
     @Environment(\.modelContext) private var context
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit = false
@@ -30,7 +35,9 @@ struct ModelReportView: View {
     @Query(sort: \HVACEvent.date, order: .reverse) private var hvacEvents: [HVACEvent]
 
     @State private var report: Report?
-    @State private var building = true
+    /// False only until the first fit finishes. Later refits keep showing the
+    /// current report instead of blanking the whole list behind a spinner.
+    @State private var hasBuilt = false
     @State private var addingEvent = false
     @State private var editingEvent: EventEditorView.ExistingEvent?
     @State private var exportFile: URL?
@@ -38,7 +45,7 @@ struct ModelReportView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if building {
+                if !hasBuilt {
                     ProgressView("Fitting…").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
@@ -300,12 +307,12 @@ struct ModelReportView: View {
     // MARK: - Building
 
     private func build() async {
-        building = true
-        defer { building = false }
+        defer { hasBuilt = true }
         let readings = IndoorFeedStore.history(source: .vevorStation, context: context)
         let observations = IndoorObservationBuilder.build(
             readings: readings, weather: series,
-            coolerEvents: coolerEvents, hvacEvents: hvacEvents)
+            coolerEvents: coolerEvents, hvacEvents: hvacEvents,
+            location: location)
         let (train, test) = IndoorModelEstimator.split(observations)
         guard let selection = IndoorModelEstimator.selectModel(train: train, test: test) else {
             report = nil
@@ -379,13 +386,18 @@ struct ModelReportView: View {
                           weather: series,
                           coolerEvents: coolerEvents,
                           hvacEvents: hvacEvents,
+                          location: location,
                           model: report?.model).write()
     }
 
     // MARK: - Event timeline
 
     private struct Entry: Identifiable {
-        let id = UUID()
+        /// The stored record's own identity. This was a fresh UUID on every
+        /// render, so each redraw looked to SwiftUI like every row being
+        /// removed and re-added — discarding a half-open swipe-to-delete, which
+        /// is why it flicked in and out.
+        let id: PersistentIdentifier
         let date: Date
         let title: String
         let setpoint: Double?
@@ -397,7 +409,7 @@ struct ModelReportView: View {
     /// Both event kinds merged, newest first.
     private var timeline: [Entry] {
         var all: [Entry] = coolerEvents.map {
-            Entry(date: $0.date,
+            Entry(id: $0.persistentModelID, date: $0.date,
                   title: $0.isOn ? "Evaporative cooler on" : "Evaporative cooler off",
                   setpoint: nil, inferred: $0.source == 1, cooler: $0)
         }
@@ -410,7 +422,7 @@ struct ModelReportView: View {
             case 3:  title = "Vent (cooler, no water)"
             default: title = "Nothing running"
             }
-            return Entry(date: $0.date, title: title,
+            return Entry(id: $0.persistentModelID, date: $0.date, title: title,
                          setpoint: $0.targetTempC, inferred: $0.source == 1, hvac: $0)
         }
         return all.sorted { $0.date > $1.date }

@@ -16,43 +16,6 @@
 
 import SwiftUI
 import SwiftData
-import UIKit
-
-/// A wheel date picker with a settable minute step.
-///
-/// SwiftUI's DatePicker offers no way to change the minute increment, and
-/// single minutes are false precision here: nobody recalls switching the AC on
-/// at 14:37, and spinning sixty positions to reach a time you are guessing at
-/// is just friction.
-struct SteppedDatePicker: UIViewRepresentable {
-    @Binding var date: Date
-    var minuteInterval: Int = 5
-    var maximum: Date = Date()
-
-    func makeUIView(context: Context) -> UIDatePicker {
-        let picker = UIDatePicker()
-        picker.datePickerMode = .dateAndTime
-        picker.preferredDatePickerStyle = .wheels
-        picker.minuteInterval = minuteInterval
-        picker.maximumDate = maximum
-        picker.addTarget(context.coordinator,
-                         action: #selector(Coordinator.changed(_:)), for: .valueChanged)
-        return picker
-    }
-
-    func updateUIView(_ picker: UIDatePicker, context: Context) {
-        picker.maximumDate = maximum
-        if abs(picker.date.timeIntervalSince(date)) > 1 { picker.date = date }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject {
-        var parent: SteppedDatePicker
-        init(_ parent: SteppedDatePicker) { self.parent = parent }
-        @objc func changed(_ picker: UIDatePicker) { parent.date = picker.date }
-    }
-}
 
 /// What the equipment changed to, as one flat choice.
 ///
@@ -98,33 +61,32 @@ enum EquipmentChange: Int, CaseIterable, Identifiable {
         self == .airConditioning || self == .heating
     }
 
+    /// The HVACEvent mode this change is stored as, or nil when it is stored as
+    /// a CoolerEvent instead.
+    var hvacMode: Int? {
+        switch self {
+        case .evaporativeCooler: return nil
+        case .unknown:           return -1
+        case .off:               return 0
+        case .heating:           return 1
+        case .airConditioning:   return 2
+        case .vent:              return 3
+        }
+    }
+
     /// Write this change into the store at `date`.
     func record(at date: Date, setpointC: Double?, context: ModelContext) {
-        switch self {
-        case .evaporativeCooler:
+        if let mode = hvacMode {
+            context.insert(HVACEvent(date: date, mode: mode,
+                                     targetTempC: takesSetpoint ? setpointC : nil, source: 0))
+        } else {
             context.insert(CoolerEvent(date: date, isOn: true, source: 0))
-        case .off:
-            // Either record type can express "off"; the timeline merges both
-            // and takes whichever is latest, so one row is enough.
-            context.insert(HVACEvent(date: date, mode: 0, targetTempC: nil, source: 0))
-        case .airConditioning:
-            context.insert(HVACEvent(date: date, mode: 2, targetTempC: setpointC, source: 0))
-        case .heating:
-            context.insert(HVACEvent(date: date, mode: 1, targetTempC: setpointC, source: 0))
-        case .vent:
-            context.insert(HVACEvent(date: date, mode: 3, targetTempC: nil, source: 0))
-        case .unknown:
-            context.insert(HVACEvent(date: date, mode: -1, targetTempC: nil, source: 0))
         }
     }
 }
 
 struct EventEditorView: View {
     /// The event being edited, if any. Nil means a new one.
-    ///
-    /// Editing replaces rather than mutates: a change of equipment can move the
-    /// record between the cooler and thermostat tables, and replacing keeps one
-    /// path instead of two that must agree.
     var editing: ExistingEvent?
 
     @Environment(\.modelContext) private var context
@@ -132,16 +94,19 @@ struct EventEditorView: View {
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit = false
 
     @State private var change: EquipmentChange = .airConditioning
-    @State private var date = Date()
+    @State private var day: Date = Calendar.current.startOfDay(for: Date())
+    @State private var hour: Int = Calendar.current.component(.hour, from: Date())
+    @State private var minute: Int = Calendar.current.component(.minute, from: Date()) / 5 * 5
     @State private var hasSetpoint = false
     @State private var setpoint: Double = 22
     @State private var saveError: String?
     @State private var loaded = false
 
-    /// A stored event handed to the editor, with whichever record it came from
-    /// so it can be removed when replaced.
+    /// A stored event handed to the editor, with whichever record it came from.
     struct ExistingEvent: Identifiable {
-        var id: Date { date }
+        /// The stored record's own identity, so two events at the same moment
+        /// can never be confused for one another.
+        var id: PersistentIdentifier? { cooler?.persistentModelID ?? hvac?.persistentModelID }
         var change: EquipmentChange
         var date: Date
         var setpointC: Double?
@@ -155,6 +120,96 @@ struct EventEditorView: View {
         useFahrenheit ? Array(stride(from: 50.0, through: 90.0, by: 1))
                       : Array(stride(from: 10.0, through: 32.0, by: 0.5))
     }
+
+    // MARK: - Time wheels
+
+    /// Days offered, newest first: the last two months, stretched further back
+    /// if the event being edited is older than that.
+    private var dayOptions: [Date] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var earliest = cal.date(byAdding: .day, value: -60, to: today) ?? today
+        if let editing { earliest = min(earliest, cal.startOfDay(for: editing.date)) }
+        var days: [Date] = []
+        var d = today
+        while d >= earliest {
+            days.append(d)
+            guard let previous = cal.date(byAdding: .day, value: -1, to: d) else { break }
+            d = previous
+        }
+        return days
+    }
+
+    /// Five-minute steps. An event recorded before the steps existed keeps its
+    /// exact minute rather than being silently moved to the nearest step.
+    private var minuteOptions: [Int] {
+        var options = Array(stride(from: 0, to: 60, by: 5))
+        if !options.contains(minute) { options.append(minute); options.sort() }
+        return options
+    }
+
+    private var composedDate: Date? {
+        Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: day)
+    }
+
+    private var isInFuture: Bool {
+        (composedDate ?? .distantPast) > Date()
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("EEE d MMM")
+        return f
+    }()
+
+    private func dayLabel(_ d: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return "Today" }
+        if cal.isDateInYesterday(d) { return "Yesterday" }
+        return Self.dayFormatter.string(from: d)
+    }
+
+    /// Three SwiftUI wheels rather than a UIDatePicker.
+    ///
+    /// UIDatePicker's wheels turn into a keyboard number field when tapped, and
+    /// offer no way to switch that off. Typing a time there was the one route
+    /// that lost an event while it was being edited. Plain wheel pickers can
+    /// only be spun, so that path no longer exists.
+    private var timeWheels: some View {
+        HStack(spacing: 0) {
+            Picker("Day", selection: $day) {
+                ForEach(dayOptions, id: \.self) { Text(dayLabel($0)).tag($0) }
+            }
+            .pickerStyle(.wheel)
+            .frame(maxWidth: .infinity)
+            // Side-by-side wheels otherwise share one touch area, so dragging
+            // one can spin its neighbour. Clipping to each frame separates them.
+            .clipped()
+            .contentShape(Rectangle())
+
+            Picker("Hour", selection: $hour) {
+                ForEach(0..<24, id: \.self) { Text(String(format: "%02d", $0)).tag($0) }
+            }
+            .pickerStyle(.wheel)
+            .frame(width: 64)
+            .clipped()
+            .contentShape(Rectangle())
+
+            Text(":").font(.title3).foregroundStyle(.secondary)
+
+            Picker("Minute", selection: $minute) {
+                ForEach(minuteOptions, id: \.self) { Text(String(format: "%02d", $0)).tag($0) }
+            }
+            .pickerStyle(.wheel)
+            .frame(width: 64)
+            .clipped()
+            .contentShape(Rectangle())
+        }
+        .labelsHidden()
+        .frame(height: 170)
+    }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
@@ -173,12 +228,16 @@ struct EventEditorView: View {
                 }
 
                 Section {
-                    SteppedDatePicker(date: $date)
-                        .frame(height: 180)
+                    timeWheels
                 } header: {
                     Text("When it changed")
                 } footer: {
-                    Text("Set the time it actually happened, not now. Readings between this moment and the next event are attributed to it.")
+                    if isInFuture {
+                        Text("That time hasn't happened yet. Choose a time up to now.")
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("Set the time it actually happened, not now. Readings between this moment and the next event are attributed to it.")
+                    }
                 }
 
                 if change.takesSetpoint {
@@ -213,17 +272,23 @@ struct EventEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
+                        .disabled(isInFuture)
                 }
             }
         }
     }
 
+    // MARK: - Loading and saving
+
     /// Fill the wheels from the event being edited, once.
     private func loadExisting() {
         guard !loaded, let editing else { loaded = true; return }
         loaded = true
+        let cal = Calendar.current
         change = editing.change
-        date = editing.date
+        day = cal.startOfDay(for: editing.date)
+        hour = cal.component(.hour, from: editing.date)
+        minute = cal.component(.minute, from: editing.date)
         if let celsius = editing.setpointC {
             hasSetpoint = true
             setpoint = useFahrenheit ? (celsius * 9 / 5 + 32).rounded()
@@ -237,23 +302,41 @@ struct EventEditorView: View {
     }
 
     private func save() {
+        guard let when = composedDate, when <= Date() else { return }
         var celsius: Double?
         if change.takesSetpoint && hasSetpoint {
             celsius = useFahrenheit ? (setpoint - 32) * 5 / 9 : setpoint
         }
-        // Replace rather than mutate, so a change of equipment type moves the
-        // record to the right table without a second code path.
+
         if let editing {
-            if let old = editing.cooler { context.delete(old) }
-            if let old = editing.hvac { context.delete(old) }
+            if let record = editing.hvac, let mode = change.hvacMode {
+                // Same table: change the record where it stands. Nothing is
+                // deleted, so nothing can be lost.
+                record.date = when
+                record.mode = mode
+                record.targetTempC = change.takesSetpoint ? celsius : nil
+            } else if let record = editing.cooler, change == .evaporativeCooler {
+                record.date = when
+                record.isOn = true
+            } else {
+                // Moving between the cooler and thermostat tables. Insert the
+                // replacement BEFORE deleting the original, so the two happen
+                // in one save or not at all.
+                change.record(at: when, setpointC: celsius, context: context)
+                if let old = editing.cooler { context.delete(old) }
+                if let old = editing.hvac { context.delete(old) }
+            }
+        } else {
+            change.record(at: when, setpointC: celsius, context: context)
         }
-        change.record(at: date, setpointC: celsius, context: context)
+
         do {
             try context.save()
         } catch {
-            // Never fail silently: an event that looks recorded but is not
-            // mislabels every reading after it, and the mistake only surfaces
-            // much later as a model that will not fit.
+            // Undo everything this save staged. Left pending, a deletion would
+            // quietly go through with the NEXT successful save — which is how
+            // an edited event could vanish without any error at the time.
+            context.rollback()
             saveError = error.localizedDescription
             return
         }

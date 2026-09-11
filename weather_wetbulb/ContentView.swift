@@ -65,32 +65,42 @@ struct ContentView: View {
             // Line 1: place name (taps open the places sheet) with a refresh
             // button on the right. Refresh lives here because the vertical
             // swipe that used to pull-to-refresh now switches screens.
-            ZStack {
+            //
+            // Side by side, never stacked. These were layered in a ZStack with
+            // the place button spanning the full width underneath, so any tap
+            // that missed the small refresh icon by a few points fell through
+            // and opened Places instead of refreshing.
+            HStack(spacing: 0) {
+                // Same width as the refresh button, so the title stays centred.
+                Color.clear.frame(width: 44, height: 44)
                 Button { showPlaces = true } label: {
                     Text(displayTitle)
                         .font(.headline)
                         .fontWeight(.semibold)
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .padding(.horizontal)
+                        .contentShape(Rectangle())
                 }
-                HStack {
-                    Spacer()
-                    Button {
-                        Task { await loadWeather(preserveData: true, useFreshLocation: true) }
-                    } label: {
+                Button {
+                    Task { await loadWeather(preserveData: true, useFreshLocation: true) }
+                } label: {
+                    Group {
                         if weather.isRefreshing {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
-                    .disabled(weather.isRefreshing)
-                    .padding(.horizontal)
-                    .accessibilityLabel("Refresh forecast")
+                    // A full 44-point target, the minimum Apple recommends.
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                 }
+                .disabled(weather.isRefreshing)
+                .accessibilityLabel("Refresh forecast")
             }
+            .padding(.horizontal, 4)
             .background(.bar)
 
             Divider()
@@ -503,7 +513,10 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showModelReport) {
-            ModelReportView(series: weather.seriesFull)
+            // The same location the forecast series was fetched for, so the
+            // sun geometry and the weather describe one place.
+            ModelReportView(series: weather.seriesFull,
+                            location: selectedPlace?.clLocation ?? locationProvider.currentLocation)
         }
     }
 }

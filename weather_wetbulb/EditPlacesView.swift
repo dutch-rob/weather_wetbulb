@@ -209,20 +209,28 @@ struct EditPlaceView: View {
         }
     }
 
-    /// Ask the USGS elevation service for the pin's ground height.
+    /// Look up the pin's ground height: USGS in the United States, a global
+    /// 30 m model elsewhere.
     ///
-    /// Coverage is the United States; anywhere else the service reports no
-    /// data, and the field is left for the user to fill in by hand.
+    /// The note names the source, because the two are not equivalent. USGS
+    /// models bare earth; the global sets are surface models sitting on top of
+    /// buildings and trees, so a reading on a ridge or in a city can be tens of
+    /// metres out. That is harmless for pressure — 30 m shifts wet bulb by a
+    /// few hundredths of a degree — but it is worth saying rather than hiding.
     private func lookUpAltitude() async {
         guard let coord = centerCoordinate else { return }
         lookingUpAltitude = true
         altitudeNote = nil
         defer { lookingUpAltitude = false }
         do {
-            let metres = try await ElevationLookup.metres(latitude: coord.latitude,
-                                                          longitude: coord.longitude)
-            altitudeText = String(format: "%.0f", metres)
-            altitudeNote = String(format: "USGS ground elevation: %.1f m", metres)
+            let reading = try await ElevationLookup.lookUp(latitude: coord.latitude,
+                                                           longitude: coord.longitude)
+            altitudeText = String(format: "%.0f", reading.metres)
+            var note = String(format: "%@: %.1f m", reading.source.label, reading.metres)
+            if reading.source.isSurfaceModel {
+                note += " — a global 30 m model. Correct it by hand on a cliff edge or an upper floor."
+            }
+            altitudeNote = note
         } catch {
             altitudeNote = error.localizedDescription
         }

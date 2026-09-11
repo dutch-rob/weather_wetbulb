@@ -145,7 +145,7 @@ struct ModelReportView: View {
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("No home marked")
-                    Text("Using the place on screen. To model your home at its own position and weather wherever you are, open Places, then Edit places, and turn on Monitored home.")
+                    Text("Using the place on screen. To model your home at its own position and weather wherever you are, open Places, tap Edit list, choose the place, and turn on Monitored home.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

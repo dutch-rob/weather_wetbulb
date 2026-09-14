@@ -25,7 +25,7 @@ struct IndoorObservationBuilderTests {
                         outdoorRH: Double? = 50,
                         lightKLux: Double? = nil) -> IndoorReading {
         let r = IndoorReading(date: t0.addingTimeInterval(m * 60),
-                              sourceID: IndoorFeedSource.vevorStation.rawValue)
+                              sourceID: "test-station")
         r.indoorTempC = indoorC
         r.indoorHumidity = indoorRH
         r.outdoorTempC = outdoorC

@@ -513,9 +513,8 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showModelReport) {
-            // The place on screen, used only when no home is marked; with a
-            // monitored home the model screen uses the home's own position and
-            // weather instead.
+            // The place on screen, so the model screen can reuse its weather
+            // when it is the monitored home rather than fetching it again.
             ModelReportView(series: weather.seriesFull,
                             location: selectedPlace?.clLocation ?? locationProvider.currentLocation,
                             places: places)

@@ -13,8 +13,9 @@ struct Place: Identifiable, Equatable, Codable {
     var longitude: Double
     var altitude: Double   // metres above sea level; 0 when unknown
     /// True when this place has an indoor sensor feed and should carry the
-    /// indoor comfort model. Off everywhere by default; the feed itself is
-    /// matched separately (see `IndoorFeedSource`).
+    /// indoor comfort model. Off everywhere by default; which station's
+    /// readings belong to it is decided from the stored data (see
+    /// `IndoorSourceResolution`).
     var indoorMonitoring: Bool
 
     init(id: UUID = UUID(), name: String, latitude: Double, longitude: Double,

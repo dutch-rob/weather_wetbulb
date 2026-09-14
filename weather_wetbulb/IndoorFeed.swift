@@ -5,10 +5,15 @@
 //  Reads the reading feed published by a local weather station app into the
 //  shared iCloud key-value store, and keeps a local copy of the history.
 //
-//  Transport note: the publisher writes to
-//  NSUbiquitousKeyValueStore, not CloudKit, relying on both apps declaring the
-//  same `com.apple.developer.ubiquity-kvstore-identifier`. Nothing for this
-//  feature appears in the CloudKit dashboard.
+//  Transport note: the publisher writes to NSUbiquitousKeyValueStore, not
+//  CloudKit, relying on both apps declaring the same
+//  `com.apple.developer.ubiquity-kvstore-identifier`. Nothing for this feature
+//  appears in the CloudKit dashboard.
+//
+//  Nothing about any particular station is compiled in. A feed is recognised
+//  by its content rather than its key, and names itself in its payload; that
+//  name is what its readings are filed under. The app learns which stations
+//  exist from the data, so a new station needs no change here.
 //
 //  The published feed is a rolling 30-day window capped at 1 MB, so it is not a
 //  durable archive. `IndoorFeedStore` copies every new row into SwiftData so the
@@ -16,7 +21,6 @@
 //
 
 import Foundation
-import CoreLocation
 import SwiftData
 
 // MARK: - Wire format
@@ -96,28 +100,32 @@ struct IndoorFeed: Codable, Equatable, Sendable {
 
 // MARK: - Sources
 
-/// A station feed this app knows how to read. One case per publisher; the
-/// key-value key and the station's location live here so adding a second
-/// station is a new case rather than new plumbing.
-enum IndoorFeedSource: String, CaseIterable, Sendable {
-    case vevorStation
+/// Which station's readings belong to the monitored home.
+///
+/// Decided from what is stored rather than from a list of known stations: one
+/// station is taken to be the home's, and more than one is refused.
+enum IndoorSourceResolution: Equatable, Sendable {
+    /// No station readings stored yet.
+    case noStation
+    /// Exactly one station, whose readings are taken to be the home's.
+    case single(String)
+    /// Readings from more than one station, sorted by name.
+    ///
+    /// TODO: Before the app is made available to other users, let the user
+    /// choose which station belongs to the monitored home instead of refusing.
+    /// One station is all this app has ever seen, so an error is enough for
+    /// now — and far better than guessing, which would fit the model to another
+    /// house's readings without any sign that it had.
+    case several([String])
 
-    /// Key the publisher writes in the shared key-value store.
-    var storeKey: String {
-        switch self {
-        case .vevorStation: return "weather_station_feed_v1"
+    init(sourceIDs: some Sequence<String>) {
+        let names = Set(sourceIDs).sorted()
+        switch names.count {
+        case 0:  self = .noStation
+        case 1:  self = .single(names[0])
+        default: self = .several(names)
         }
     }
-
-    /// `source` string the publisher stamps into the payload.
-    var sourceID: String {
-        switch self {
-        case .vevorStation: return "weather-station"
-        }
-    }
-
-    /// How close a place must be to count as this station's location.
-    static let matchRadius: CLLocationDistance = 2_000   // metres
 }
 
 // MARK: - Reader
@@ -129,14 +137,27 @@ enum IndoorFeedSource: String, CaseIterable, Sendable {
 struct IndoorFeedReader: Sendable {
     var store: NSUbiquitousKeyValueStore = .default
 
-    /// The feed for `source`, or nil when nothing has been published yet or the
-    /// payload does not decode.
-    func feed(for source: IndoorFeedSource) -> IndoorFeed? {
-        guard let data = store.data(forKey: source.storeKey) else { return nil }
-        guard let feed = try? JSONDecoder().decode(IndoorFeed.self, from: data) else { return nil }
-        // Guard against a key collision writing something else here.
-        guard feed.source == source.sourceID else { return nil }
-        return feed
+    /// Every station feed in the key-value store.
+    func feeds() -> [IndoorFeed] {
+        Self.feeds(in: store.dictionaryRepresentation)
+    }
+
+    /// Station feeds among arbitrary stored values, in key order.
+    ///
+    /// Recognised by content, not by key: anything that decodes as a feed and
+    /// names its station is one. The key is the publisher's choice, and looking
+    /// it up by name would compile that publisher's naming into this app. Other
+    /// values sharing the store — synced places, settings — fail to decode and
+    /// are skipped.
+    static func feeds(in values: [String: Any]) -> [IndoorFeed] {
+        let decoder = JSONDecoder()
+        return values.keys.sorted().compactMap { key -> IndoorFeed? in
+            guard let data = values[key] as? Data,
+                  let feed = try? decoder.decode(IndoorFeed.self, from: data),
+                  !feed.source.isEmpty
+            else { return nil }
+            return feed
+        }
     }
 
     /// Ask iCloud to pull down anything newer. Cheap; safe to call on refresh.
@@ -156,8 +177,9 @@ struct IndoorFeedReader: Sendable {
 final class IndoorReading {
     /// Reading time, rounded to the minute by the publisher.
     var date: Date = Date()
-    /// Raw value of `IndoorFeedSource`, so a second station stays separable.
-    var sourceID: String = IndoorFeedSource.vevorStation.rawValue
+    /// The station's own name for itself — the feed's `src` — so readings from
+    /// a second station stay separable.
+    var sourceID: String = ""
 
     var indoorTempC: Double?
     var indoorHumidity: Double?          // percent, 0…100 as published
@@ -173,11 +195,20 @@ final class IndoorReading {
     /// needs no reduction before psychrometry.
     var stationPressureHPa: Double?
 
+    /// 2 for rows filed under the station's own name. Rows at 1 predate that
+    /// and carry a name the app used to supply itself; see
+    /// `IndoorFeedStore.adoptLegacyRows`.
     var schemaVersion: Int = 1
+
+    static let legacySchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     init(date: Date, sourceID: String) {
         self.date = date
         self.sourceID = sourceID
+        // Set here rather than as the property's default, so the stored schema
+        // is untouched and rows already on disk keep reading as 1.
+        self.schemaVersion = Self.currentSchemaVersion
     }
 
     /// Fill from a decoded feed row.
@@ -204,18 +235,17 @@ final class IndoorReading {
 /// Copies newly published rows into the local store.
 ///
 /// The publisher republishes its whole window each time, so ingest is
-/// idempotent: rows already stored (same source and timestamp) are skipped
+/// idempotent: rows already stored (same station and timestamp) are skipped
 /// rather than duplicated.
 struct IndoorFeedStore {
 
-    /// Merge `feed` into `context`, returning how many new rows were stored.
+    /// Merge `feed` into `context` under the name the feed gives itself,
+    /// returning how many new rows were stored.
     @discardableResult
-    static func ingest(_ feed: IndoorFeed,
-                       source: IndoorFeedSource,
-                       context: ModelContext) throws -> Int {
+    static func ingest(_ feed: IndoorFeed, context: ModelContext) throws -> Int {
         guard !feed.readings.isEmpty else { return 0 }
 
-        let sourceID = source.rawValue
+        let sourceID = feed.source
         // One fetch of the existing window, rather than a query per row.
         let oldest = feed.readings.map(\.date).min() ?? .distantPast
         var descriptor = FetchDescriptor<IndoorReading>(
@@ -232,11 +262,58 @@ struct IndoorFeedStore {
         return inserted
     }
 
-    /// Stored rows for a source, oldest first.
-    static func history(source: IndoorFeedSource,
+    /// Refile rows stored before stations named themselves.
+    ///
+    /// Those rows carry a name the app used to supply, not the one their
+    /// publisher uses, so left alone every reading would appear to come from
+    /// two stations and stop the model. They can only have come from the one
+    /// station the app then read, so once exactly one station is publishing
+    /// they are relabelled as its readings. A legacy row whose timestamp is
+    /// already stored under the new name is the same reading twice, and is
+    /// dropped instead.
+    ///
+    /// Returns how many rows were relabelled or dropped.
+    @discardableResult
+    static func adoptLegacyRows(as sourceID: String, context: ModelContext) throws -> Int {
+        let legacy = IndoorReading.legacySchemaVersion
+        let rows = try context.fetch(FetchDescriptor<IndoorReading>(
+            predicate: #Predicate { $0.schemaVersion == legacy }))
+        guard !rows.isEmpty else { return 0 }
+
+        var current = FetchDescriptor<IndoorReading>(
+            predicate: #Predicate { $0.sourceID == sourceID && $0.schemaVersion != legacy })
+        current.propertiesToFetch = [\.date]
+        let stored = Set(try context.fetch(current).map(\.date))
+
+        for row in rows {
+            if stored.contains(row.date) {
+                context.delete(row)
+            } else {
+                row.sourceID = sourceID
+                row.schemaVersion = IndoorReading.currentSchemaVersion
+            }
+        }
+        try context.save()
+        return rows.count
+    }
+
+    /// Every station name with readings stored, sorted.
+    static func sourceIDs(context: ModelContext) -> [String] {
+        var descriptor = FetchDescriptor<IndoorReading>()
+        descriptor.propertiesToFetch = [\.sourceID]
+        let rows = (try? context.fetch(descriptor)) ?? []
+        return Set(rows.map(\.sourceID)).sorted()
+    }
+
+    /// Which station's readings belong to the monitored home.
+    static func resolveSource(context: ModelContext) -> IndoorSourceResolution {
+        IndoorSourceResolution(sourceIDs: sourceIDs(context: context))
+    }
+
+    /// Stored rows for a station, oldest first.
+    static func history(sourceID: String,
                         since: Date = .distantPast,
                         context: ModelContext) -> [IndoorReading] {
-        let sourceID = source.rawValue
         let descriptor = FetchDescriptor<IndoorReading>(
             predicate: #Predicate { $0.sourceID == sourceID && $0.date >= since },
             sortBy: [SortDescriptor(\.date)])
@@ -245,30 +322,12 @@ struct IndoorFeedStore {
 
     /// Timestamp of the earliest stored row, used to decide how often the model
     /// should be re-estimated while history is still short.
-    static func firstReadingDate(source: IndoorFeedSource,
+    static func firstReadingDate(sourceID: String,
                                  context: ModelContext) -> Date? {
-        let sourceID = source.rawValue
         var descriptor = FetchDescriptor<IndoorReading>(
             predicate: #Predicate { $0.sourceID == sourceID },
             sortBy: [SortDescriptor(\.date)])
         descriptor.fetchLimit = 1
         return (try? context.fetch(descriptor))?.first?.date
-    }
-}
-
-// MARK: - Place matching
-
-extension Place {
-    /// The station feed this place should use: the explicit opt-in first, and
-    /// otherwise a current-location place that sits within the match radius of
-    /// a known station.
-    func indoorFeedSource(stationLocation: (IndoorFeedSource) -> CLLocation?) -> IndoorFeedSource? {
-        for source in IndoorFeedSource.allCases {
-            guard let stationLoc = stationLocation(source) else { continue }
-            if clLocation.distance(from: stationLoc) <= IndoorFeedSource.matchRadius {
-                return source
-            }
-        }
-        return indoorMonitoring ? IndoorFeedSource.allCases.first : nil
     }
 }

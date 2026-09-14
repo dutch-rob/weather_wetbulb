@@ -22,9 +22,8 @@ import CoreLocation
 struct ModelReportView: View {
     /// WeatherKit series to align the station readings against.
     let series: [ForecastPoint]
-    /// Where the house is, for sun geometry. Without it the solar terms fall
-    /// back to cloud cover alone — which every fit did until this was passed
-    /// in, because nothing supplied it.
+    /// The place on screen. Used only to tell whether it is the monitored
+    /// home, in which case the weather already loaded for it is reused.
     var location: CLLocation? = nil
     /// Saved places, to find the monitored home.
     @ObservedObject var places: PlacesViewModel
@@ -47,6 +46,8 @@ struct ModelReportView: View {
     @State private var addingEvent = false
     @State private var editingEvent: EventEditorView.ExistingEvent?
     @State private var exportFile: URL?
+    /// Why no model could be fitted on the last attempt, when that was so.
+    @State private var blocker: Blocker?
 
     var body: some View {
         NavigationStack {
@@ -111,25 +112,51 @@ struct ModelReportView: View {
 
     private var home: Place? { places.monitoredHome }
 
+    /// Places this close together are the same site, so the weather already
+    /// loaded for the screen can stand in for the home's.
+    private static let sameSiteRadius: CLLocationDistance = 2_000   // metres
+
     /// True when the home is not the place on screen, so its weather must be
     /// fetched separately rather than borrowed from the main screen.
     private var needsOwnWeather: Bool {
         guard let home else { return false }
         guard let shown = location else { return true }
-        return shown.distance(from: home.clLocation) > IndoorFeedSource.matchRadius
+        return shown.distance(from: home.clLocation) > Self.sameSiteRadius
     }
 
-    /// The home's position when one is marked, else the place on screen.
-    private var modelLocation: CLLocation? { home?.clLocation ?? location }
-
-    /// Weather describing the same place as `modelLocation`.
+    /// Weather describing the monitored home.
     private var modelSeries: [ForecastPoint] { needsOwnWeather ? homeWeather.seriesFull : series }
+
+    /// Why no model can be fitted, when one cannot.
+    enum Blocker: Equatable {
+        case noHome
+        case noAltitude(home: String)
+        case noReadings
+        case severalStations([String])
+    }
+
+    /// The model is fitted only for a monitored home with a known altitude,
+    /// from the readings of exactly one station. Each is load-bearing: the
+    /// home's position drives the sun geometry, its altitude the pressure and
+    /// so the psychrometry, and a single station is what makes it safe to take
+    /// the readings as coming from that house.
+    static func blocker(home: Place?, resolution: IndoorSourceResolution) -> Blocker? {
+        guard let home else { return .noHome }
+        // A place records an unknown altitude as 0.
+        guard home.altitude != 0 else { return .noAltitude(home: home.name) }
+        switch resolution {
+        case .noStation:          return .noReadings
+        case .several(let names): return .severalStations(names)
+        case .single:             return nil
+        }
+    }
 
     // MARK: - Sections
 
+    @ViewBuilder
     private var homeSection: some View {
-        Section {
-            if let home {
+        if let home {
+            Section {
                 row("Modelling", home.name)
                 if needsOwnWeather && !homeWeather.hasHistory {
                     HStack(spacing: 8) {
@@ -137,16 +164,6 @@ struct ModelReportView: View {
                         Text("Fetching \(home.name)'s weather history…")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                }
-                if home.altitude == 0 {
-                    Text("This place has no altitude recorded, so WeatherKit's pressure is treated as sea level. That skews wet bulb for a house at elevation.")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No home marked")
-                    Text("Using the place on screen. To model your home at its own position and weather wherever you are, open Places, tap Edit list, choose the place, and turn on Monitored home.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -357,12 +374,37 @@ struct ModelReportView: View {
     private var unavailable: some View {
         Section {
             VStack(alignment: .leading, spacing: 6) {
-                Label("No model yet", systemImage: "chart.xyaxis.line")
+                Label(unavailableTitle, systemImage: "chart.xyaxis.line")
                     .font(.headline)
-                Text("The model needs a stretch of station readings close enough together to measure a rate of change. Readings arrive about every 18 minutes.")
+                Text(unavailableDetail)
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    private var unavailableTitle: String {
+        switch blocker {
+        case .noHome:          return "No home marked"
+        case .noAltitude:      return "No altitude for your home"
+        case .noReadings:      return "No station readings yet"
+        case .severalStations: return "Readings from more than one station"
+        case nil:              return "No model yet"
+        }
+    }
+
+    private var unavailableDetail: String {
+        switch blocker {
+        case .noHome:
+            return "The model describes one house: the place marked as your monitored home. Open Places, tap Edit list, choose the place, and turn on Monitored home."
+        case .noAltitude(let name):
+            return "\(name) has no altitude recorded. Set it in the place editor, where Look up can fill it in. Without it WeatherKit's sea-level pressure would stand in for the house's own, skewing wet bulb at elevation."
+        case .noReadings:
+            return "Readings from the weather station app arrive about every 18 minutes."
+        case .severalStations(let names):
+            return "Stored readings come from \(names.count) stations: \(names.joined(separator: ", ")). Choosing which one is your home's is not supported yet, so no model is fitted rather than risk describing the wrong house."
+        case nil:
+            return "The model needs a stretch of station readings close enough together to measure a rate of change. Readings arrive about every 18 minutes."
         }
     }
 
@@ -370,15 +412,25 @@ struct ModelReportView: View {
 
     private func build() async {
         defer { hasBuilt = true }
-        let readings = IndoorFeedStore.history(source: .vevorStation, context: context)
+        let resolution = IndoorFeedStore.resolveSource(context: context)
+        var readings: [IndoorReading] = []
+        if case .single(let station) = resolution {
+            readings = IndoorFeedStore.history(sourceID: station, context: context)
+        }
+        blocker = Self.blocker(home: home, resolution: resolution)
+        guard blocker == nil, let home else {
+            report = nil
+            exportFile = writeExport(readings)
+            return
+        }
         let observations = IndoorObservationBuilder.build(
             readings: readings, weather: modelSeries,
             coolerEvents: coolerEvents, hvacEvents: hvacEvents,
-            location: modelLocation)
+            location: home.clLocation)
         let (train, test) = IndoorModelEstimator.split(observations)
         guard let selection = IndoorModelEstimator.selectModel(train: train, test: test) else {
             report = nil
-            exportFile = writeExport()
+            exportFile = writeExport(readings)
             return
         }
         report = Report(model: selection.model, observations: observations,
@@ -389,7 +441,7 @@ struct ModelReportView: View {
         // screen opened meant that adding an event refreshed the report but
         // left Export sharing the snapshot taken beforehand — silently missing
         // the very event just recorded.
-        exportFile = writeExport()
+        exportFile = writeExport(readings)
     }
 
     // MARK: - Report
@@ -442,14 +494,16 @@ struct ModelReportView: View {
     /// different inputs cannot be compared with this one. With the readings,
     /// the WeatherKit series and the resulting coefficients all present, an
     /// offline refit either reproduces `model` or reveals a bug.
-    private func writeExport() -> URL? {
-        ModelExport.build(readings: IndoorFeedStore.history(source: .vevorStation,
-                                                            context: context),
-                          weather: modelSeries,
-                          coolerEvents: coolerEvents,
-                          hvacEvents: hvacEvents,
-                          location: modelLocation,
-                          model: report?.model).write()
+    private func writeExport(_ readings: [IndoorReading]) -> URL? {
+        // Written whenever there are readings, even with no fit, so the data
+        // can still be examined elsewhere.
+        guard !readings.isEmpty else { return nil }
+        return ModelExport.build(readings: readings,
+                                 weather: modelSeries,
+                                 coolerEvents: coolerEvents,
+                                 hvacEvents: hvacEvents,
+                                 location: home?.clLocation,
+                                 model: report?.model).write()
     }
 
     // MARK: - Event timeline

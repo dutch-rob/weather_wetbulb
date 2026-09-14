@@ -72,26 +72,48 @@ final class IndoorSamplingCoordinator {
         ingestNow(context: IndoorStore.container.mainContext)
     }
 
-    /// Read every known station feed and file any rows not already stored.
+    /// Read every station feed in the shared store and file any rows not
+    /// already stored.
     @discardableResult
     func ingestNow(context: ModelContext) -> Int {
         guard enabled else { return 0 }
         reader.synchronize()
+        let feeds = reader.feeds()
+        lastIngestAt = Date()
 
-        var total = 0
-        for source in IndoorFeedSource.allCases {
-            guard let feed = reader.feed(for: source) else { continue }
+        // Refile rows stored under the app's old name for the station BEFORE
+        // ingesting: ingesting first would store the same readings a second
+        // time under the station's own name. Only done while a single station
+        // is publishing, since only then is it certain whose those rows are.
+        let stations = Set(feeds.map(\.source))
+        if stations.count == 1, let station = stations.first {
             do {
-                let added = try IndoorFeedStore.ingest(feed, source: source, context: context)
-                total += added
-                if added > 0 {
-                    log.info("Ingested \(added, privacy: .public) rows from \(source.rawValue, privacy: .public).")
+                let refiled = try IndoorFeedStore.adoptLegacyRows(as: station, context: context)
+                if refiled > 0 {
+                    log.info("Refiled \(refiled, privacy: .public) rows stored before stations named themselves.")
                 }
             } catch {
-                log.error("Ingest failed for \(source.rawValue, privacy: .public): \(error, privacy: .public)")
+                // Try again next time rather than ingest on top of rows that
+                // would then be duplicated.
+                log.error("Refiling older rows failed: \(error, privacy: .public)")
+                return 0
             }
         }
-        lastIngestAt = Date()
+
+        var total = 0
+        for feed in feeds {
+            do {
+                let added = try IndoorFeedStore.ingest(feed, context: context)
+                total += added
+                if added > 0 {
+                    // A station's name can identify a household, so it stays
+                    // out of the public log.
+                    log.info("Ingested \(added, privacy: .public) rows from \(feed.source, privacy: .private).")
+                }
+            } catch {
+                log.error("Ingest failed for \(feed.source, privacy: .private): \(error, privacy: .public)")
+            }
+        }
         return total
     }
 

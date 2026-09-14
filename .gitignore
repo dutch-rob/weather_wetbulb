@@ -8,8 +8,9 @@ DerivedData/
 # macOS
 .DS_Store
 
-# Claude Code agent worktrees
-.claude/worktrees/
+# Claude Code: agent worktrees, and settings that record absolute paths on the
+# machine they were written on
+.claude/
 
 # Xcode per-user state (schemes, breakpoints) — churns constantly
 xcuserdata/

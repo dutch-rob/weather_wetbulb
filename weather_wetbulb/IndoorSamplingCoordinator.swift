@@ -2,8 +2,8 @@
 //  IndoorSamplingCoordinator.swift
 //  weather_wetbulb
 //
-//  Pulls the local weather station's feed out of the shared iCloud key-value
-//  store and files the new rows into the local history.
+//  Reads the weather station's archive from CloudKit and files the days that
+//  changed into the local history.
 //
 //  This used to read HomeKit sensors and pair them with a WeatherKit snapshot.
 //  It no longer does: indoor data comes only from the station, which reports on
@@ -31,7 +31,7 @@ final class IndoorSamplingCoordinator {
     static let shared = IndoorSamplingCoordinator()
     private init() {}
 
-    private let reader = IndoorFeedReader()
+    private let archive = StationCloudArchive()
     private var lastIngestAt: Date?
     /// The station publishes roughly every 18 minutes; checking much more often
     /// than that only spends battery re-reading the same payload.
@@ -69,52 +69,68 @@ final class IndoorSamplingCoordinator {
     func sampleIfDue(force: Bool = false) async {
         guard enabled else { return }
         if !force, let last = lastIngestAt, Date().timeIntervalSince(last) < minInterval { return }
-        ingestNow(context: IndoorStore.container.mainContext)
+        await ingestNow(context: IndoorStore.container.mainContext)
     }
 
-    /// Read every station feed in the shared store and file any rows not
-    /// already stored.
+    /// Read the days that changed in the station's archive and file them,
+    /// returning how many report rounds were filed.
     @discardableResult
-    func ingestNow(context: ModelContext) -> Int {
+    func ingestNow(context: ModelContext) async -> Int {
         guard enabled else { return 0 }
-        reader.synchronize()
-        let feeds = reader.feeds()
         lastIngestAt = Date()
 
-        // Refile rows stored under the app's old name for the station BEFORE
-        // ingesting: ingesting first would store the same readings a second
-        // time under the station's own name. Only done while a single station
-        // is publishing, since only then is it certain whose those rows are.
-        let stations = Set(feeds.map(\.source))
-        if stations.count == 1, let station = stations.first {
-            do {
-                let refiled = try IndoorFeedStore.adoptLegacyRows(as: station, context: context)
-                if refiled > 0 {
-                    log.info("Refiled \(refiled, privacy: .public) rows stored before stations named themselves.")
-                }
-            } catch {
-                // Try again next time rather than ingest on top of rows that
-                // would then be duplicated.
-                log.error("Refiling older rows failed: \(error, privacy: .public)")
-                return 0
+        let changes: StationCloudArchive.Changes
+        do {
+            changes = try await archive.fetchChanges()
+        } catch {
+            // Offline, signed out of iCloud, or the service is busy. The archive
+            // keeps everything, so the next attempt catches up.
+            log.error("Reading the station archive failed: \(error, privacy: .public)")
+            return 0
+        }
+        guard !changes.days.isEmpty else { return 0 }
+
+        let defaults = UserDefaults.standard
+        let stations = StationReadingStore.stationNames(
+            changes.days.map(\.station),
+            remembered: defaults.string(forKey: SettingsKey.stationArchiveName))
+        var filed = 0
+        var unnamed = 0
+        do {
+            for (day, station) in zip(changes.days, stations) {
+                guard let station else { unnamed += 1; continue }
+                let rounds = StationDay.rounds(StationDay.samples(fromPayload: day.payload))
+                filed += try StationReadingStore.applyDay(day.day, station: station,
+                                                          rounds: rounds, context: context)
             }
+            // Read from the start, the archive holds everything the key-value
+            // feed ever carried, so the rows that came that way can go.
+            if changes.fromStart && unnamed == 0 {
+                let retired = try StationReadingStore.retireFeedRows(context: context)
+                if retired > 0 {
+                    log.info("Retired \(retired, privacy: .public) rows from the old key-value feed.")
+                }
+            }
+            try context.save()
+        } catch {
+            context.rollback()
+            log.error("Filing station readings failed: \(error, privacy: .public)")
+            return 0
         }
 
-        var total = 0
-        for feed in feeds {
-            do {
-                let added = try IndoorFeedStore.ingest(feed, context: context)
-                total += added
-                if added > 0 {
-                    // A station's name can identify a household, so it stays
-                    // out of the public log.
-                    log.info("Ingested \(added, privacy: .public) rows from \(feed.source, privacy: .private).")
-                }
-            } catch {
-                log.error("Ingest failed for \(feed.source, privacy: .private): \(error, privacy: .public)")
-            }
+        if let name = stations.compactMap({ $0 }).last {
+            defaults.set(name, forKey: SettingsKey.stationArchiveName)
         }
-        return total
+        if unnamed == 0 {
+            await archive.commit()
+        } else {
+            // Leave the token where it was, so those days are read again once
+            // their station can be told rather than being skipped for good.
+            log.error("\(unnamed, privacy: .public) day records name no station and were not filed.")
+        }
+        // Station names can identify a household, so they stay out of the public log.
+        log.info("Filed \(filed, privacy: .public) report rounds from \(changes.days.count, privacy: .public) days.")
+        return filed
     }
 
     // MARK: Manual event logging
@@ -143,7 +159,7 @@ final class IndoorSamplingCoordinator {
 
     func runBackgroundSample() async {
         guard enabled else { return }
-        ingestNow(context: IndoorStore.container.mainContext)
+        await ingestNow(context: IndoorStore.container.mainContext)
         scheduleBackgroundSample()
     }
 }

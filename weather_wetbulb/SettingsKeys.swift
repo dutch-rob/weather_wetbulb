@@ -28,8 +28,11 @@ enum SettingsKey {
     /// Decided once, on the first launch after updating/installing.
     static let isUpgradeUser   = "isUpgradeUser"
 
-    // Indoor-comfort feature (station feed)
+    // Indoor-comfort feature (station readings)
     static let indoorTrackingEnabled = "indoorTrackingEnabled"
+    /// Name of the station whose CloudKit archive was last read, for day
+    /// records that do not name one.
+    static let stationArchiveName = "stationArchiveName"
     // Where the station is, remembered so the app can tell whether the
     // current location is close enough to show that home's indoor screen.
     static let indoorHomeLatitude     = "indoorHomeLatitude"

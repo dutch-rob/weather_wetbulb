@@ -41,7 +41,7 @@ struct weather_wetbulbApp: App {
             ContentView()
         }
         .modelContainer(IndoorStore.container)
-        // Best-effort background ingest of the station feed. iOS grants these
+        // Best-effort background read of the station's iCloud archive. iOS grants these
         // opportunistically, but that no longer biases the data: the station
         // records on its own cadence regardless, so a missed refresh only
         // delays when rows are filed, never loses them.

@@ -412,10 +412,10 @@ struct ModelReportView: View {
 
     private func build() async {
         defer { hasBuilt = true }
-        let resolution = IndoorFeedStore.resolveSource(context: context)
+        let resolution = StationReadingStore.resolveSource(context: context)
         var readings: [IndoorReading] = []
         if case .single(let station) = resolution {
-            readings = IndoorFeedStore.history(sourceID: station, context: context)
+            readings = StationReadingStore.history(sourceID: station, context: context)
         }
         blocker = Self.blocker(home: home, resolution: resolution)
         guard blocker == nil, let home else {

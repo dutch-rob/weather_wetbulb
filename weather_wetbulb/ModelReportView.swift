@@ -46,6 +46,10 @@ struct ModelReportView: View {
     @State private var addingEvent = false
     @State private var editingEvent: EventEditorView.ExistingEvent?
     @State private var exportFile: URL?
+    /// Archived weather for the home, which reaches further back than the ten
+    /// days WeatherKit still serves.
+    @State private var archivedSeries: [ForecastPoint] = []
+    @State private var archiveNote = ""
     /// Why no model could be fitted on the last attempt, when that was so.
     @State private var blocker: Blocker?
 
@@ -91,6 +95,7 @@ struct ModelReportView: View {
             if needsOwnWeather, let home {
                 await homeWeather.loadFor(location: home.clLocation)
             }
+            await refreshArchive()
             await build()
         }
         // History arrives in a second request after the forecast, and it is the
@@ -98,7 +103,7 @@ struct ModelReportView: View {
         // failed history load is silent, which is why the first fit does not
         // wait for it.
         .onChange(of: homeWeather.hasHistory) { _, arrived in
-            if arrived { Task { await build() } }
+            if arrived { Task { await refreshArchive(); await build() } }
         }
         .sheet(isPresented: $addingEvent, onDismiss: { Task { await build() } }) {
             EventEditorView()
@@ -124,8 +129,37 @@ struct ModelReportView: View {
         return shown.distance(from: home.clLocation) > Self.sameSiteRadius
     }
 
-    /// Weather describing the monitored home.
-    private var modelSeries: [ForecastPoint] { needsOwnWeather ? homeWeather.seriesFull : series }
+    /// Weather from this screen's own load: the forecast, and the ten days of
+    /// history WeatherKit will still serve.
+    private var liveSeries: [ForecastPoint] { needsOwnWeather ? homeWeather.seriesFull : series }
+
+    /// Weather describing the monitored home: everything archived, with freshly
+    /// fetched hours winning where the two overlap, since WeatherKit revises
+    /// its own history and the later answer is its best one.
+    private var modelSeries: [ForecastPoint] {
+        guard !archivedSeries.isEmpty else { return liveSeries }
+        var byHour: [Date: ForecastPoint] = [:]
+        for point in archivedSeries { byHour[point.date] = point }
+        for point in liveSeries { byHour[point.date] = point }
+        return byHour.values.sorted { $0.date < $1.date }
+    }
+
+    /// Bring the weather archive up to date, then read back what it holds.
+    ///
+    /// The fit reads the archive rather than whatever WeatherKit will serve
+    /// today, so a reading from three weeks ago is matched against the weather
+    /// of its own hour instead of the oldest hour still on hand.
+    private func refreshArchive() async {
+        guard let home else { return }
+        var earliest: Date?
+        if case .single(let station) = StationReadingStore.resolveSource(context: context) {
+            earliest = StationReadingStore.firstReadingDate(sourceID: station, context: context)
+        }
+        archiveNote = await WeatherArchiveCoordinator.shared.sync(
+            location: home.clLocation, live: liveSeries, earliestNeeded: earliest, context: context)
+        archivedSeries = WeatherArchiveStore.points(place: WeatherArchive.placeKey(home.clLocation),
+                                                    context: context)
+    }
 
     /// Why no model can be fitted, when one cannot.
     enum Blocker: Equatable {
@@ -164,6 +198,12 @@ struct ModelReportView: View {
                         Text("Fetching \(home.name)'s weather history…")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                }
+                if let first = archivedSeries.first?.date {
+                    row("Weather archived", "\(archivedSeries.count) hours from \(Self.stamp(first))")
+                }
+                if !archiveNote.isEmpty {
+                    Text(archiveNote).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }

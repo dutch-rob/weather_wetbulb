@@ -219,6 +219,21 @@ final class WeatherService: ObservableObject {
 
     // MARK: - History
 
+    /// Hourly observations for a past range, for the archive's backfill.
+    ///
+    /// Separate from `loadHistory` because it answers about a stretch nobody is
+    /// looking at: it publishes nothing and belongs to no load generation, so a
+    /// slow reply for a week in the past cannot disturb what is on screen.
+    static func pastHours(at location: CLLocation, from: Date, to: Date) async throws -> [ForecastPoint] {
+        guard to > from else { return [] }
+        let past = try await withTimeout(30) {
+            try await sharedWeatherService.weather(for: location,
+                                                   including: .hourly(startDate: from, endDate: to))
+        }
+        return WeatherMapping.mapPoints(from: Array(past), start: from, end: to, location: location)
+    }
+
+
     /// Fetch the past `days` of hourly observations and merge them into
     /// `seriesFull` ahead of the forecast. Failure is silent: history is an
     /// enhancement, and the forecast is already on screen.

@@ -7,8 +7,8 @@
 //  The screen exists because a fitted model is otherwise opaque: a forecast
 //  line gives no way to tell a good fit from one that is quietly missing half
 //  its inputs. So this shows the coefficients, how well they scored on held-out
-//  data, which variables actually had data behind them, and every heating or
-//  cooling event the fit was given.
+//  data, and which variables actually had data behind them. The heating and
+//  cooling events the fit was given have their own screen, EventsView.
 //
 //  One rule throughout: a coefficient that could not be estimated is shown as
 //  "not estimable", never as 0.000. A zero looks like a measured finding of no
@@ -43,8 +43,6 @@ struct ModelReportView: View {
     /// False only until the first fit finishes. Later refits keep showing the
     /// current report instead of blanking the whole list behind a spinner.
     @State private var hasBuilt = false
-    @State private var addingEvent = false
-    @State private var editingEvent: EventEditorView.ExistingEvent?
     @State private var exportFile: URL?
     /// Archived weather for the home, which reaches further back than the ten
     /// days WeatherKit still serves.
@@ -52,6 +50,11 @@ struct ModelReportView: View {
     @State private var archiveNote = ""
     /// Why no model could be fitted on the last attempt, when that was so.
     @State private var blocker: Blocker?
+    /// Counts fits started, so an older one finishing late cannot overwrite a
+    /// newer answer.
+    @State private var fitGeneration = 0
+    /// A refit is running behind a report already on screen.
+    @State private var isFitting = false
 
     var body: some View {
         NavigationStack {
@@ -60,10 +63,6 @@ struct ModelReportView: View {
                     ProgressView("Fitting…").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
-                        // Events stay reachable even with no model. Logging one
-                        // is most useful before the readings arrive, not after,
-                        // and a full-screen placeholder would block the only
-                        // way to record what the equipment is doing.
                         homeSection
                         if let report {
                             fitSection(report)
@@ -79,7 +78,7 @@ struct ModelReportView: View {
                         } else {
                             unavailable
                         }
-                        eventSection
+                        exportSection
                     }
                 }
             }
@@ -104,12 +103,6 @@ struct ModelReportView: View {
         // wait for it.
         .onChange(of: homeWeather.hasHistory) { _, arrived in
             if arrived { Task { await refreshArchive(); await build() } }
-        }
-        .sheet(isPresented: $addingEvent, onDismiss: { Task { await build() } }) {
-            EventEditorView()
-        }
-        .sheet(item: $editingEvent, onDismiss: { Task { await build() } }) { existing in
-            EventEditorView(editing: existing)
         }
     }
 
@@ -211,6 +204,12 @@ struct ModelReportView: View {
 
     private func fitSection(_ r: Report) -> some View {
         Section {
+            if isFitting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Refitting…").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             row("Observations", "\(r.model.observationCount) fitted, \(r.observations.count) built")
             if let first = r.observations.first?.date, let last = r.observations.last?.date {
                 row("Span", "\(Self.stamp(first)) → \(Self.stamp(last))")
@@ -326,90 +325,18 @@ struct ModelReportView: View {
         }
     }
 
-    private var eventSection: some View {
-        Section {
-            Button {
-                addingEvent = true
-            } label: {
-                Label("Add event", systemImage: "plus.circle")
-            }
-
-            if let file = exportFile {
+    /// The fit's inputs and output, for checking elsewhere.
+    @ViewBuilder
+    private var exportSection: some View {
+        if let file = exportFile {
+            Section {
                 ShareLink(item: file) {
                     Label("Export model and data", systemImage: "square.and.arrow.up")
                 }
             }
-
-            if timeline.isEmpty {
-                Text("Nothing recorded, so the fit assumes nothing has ever run.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(timeline) { entry in
-                    Button {
-                        editingEvent = existing(from: entry)
-                    } label: {
-                        eventRow(entry)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .onDelete(perform: deleteEvents)
-            }
-        } header: {
-            Text("Events, newest first")
-        } footer: {
-            Text("Tap an event to correct it. Everything before the first event counts as nothing running, so an event-free stretch needs no marking. Unlabelled time AFTER an event is attributed to that event — an unrecorded change flattens the passive terms.")
         }
     }
 
-    private func eventRow(_ entry: Entry) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(entry.title)
-                            Spacer()
-                            Text(entry.inferred ? "guessed" : "logged")
-                                .font(.caption)
-                                .foregroundStyle(entry.inferred ? .orange : .secondary)
-                        }
-            Text(Self.stamp(entry.date))
-                .font(.caption).foregroundStyle(.secondary)
-            if let setpoint = entry.setpoint {
-                Text(setpointText(setpoint))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .contentShape(Rectangle())
-    }
-
-    /// Translate a listed row back into what the editor needs.
-    private func existing(from entry: Entry) -> EventEditorView.ExistingEvent {
-        let change: EquipmentChange
-        if let cooler = entry.cooler {
-            change = cooler.isOn ? .evaporativeCooler : .off
-        } else {
-            change = EquipmentChange(rawValue: entry.hvac?.mode ?? 0) ?? .off
-        }
-        return EventEditorView.ExistingEvent(
-            change: change, date: entry.date, setpointC: entry.setpoint,
-            cooler: entry.cooler, hvac: entry.hvac)
-    }
-
-    private func setpointText(_ celsius: Double) -> String {
-        useFahrenheit ? String(format: "set to %.0f °F", celsius * 9 / 5 + 32)
-                      : String(format: "set to %.1f °C", celsius)
-    }
-
-    /// Remove events. Deleting is how a mistyped one is corrected: re-add it
-    /// with the right time rather than editing in place, which would have to
-    /// know which of the two record types it came from.
-    private func deleteEvents(at offsets: IndexSet) {
-        for index in offsets {
-            let entry = timeline[index]
-            if let cooler = entry.cooler { context.delete(cooler) }
-            if let hvac = entry.hvac { context.delete(hvac) }
-        }
-        try? context.save()
-        Task { await build() }
-    }
 
     private var unavailable: some View {
         Section {
@@ -451,7 +378,15 @@ struct ModelReportView: View {
     // MARK: - Building
 
     private func build() async {
-        defer { hasBuilt = true }
+        fitGeneration += 1
+        let generation = fitGeneration
+        isFitting = true
+        defer {
+            if generation == fitGeneration {
+                isFitting = false
+                hasBuilt = true
+            }
+        }
         let resolution = StationReadingStore.resolveSource(context: context)
         var readings: [IndoorReading] = []
         if case .single(let station) = resolution {
@@ -468,7 +403,15 @@ struct ModelReportView: View {
             coolerEvents: coolerEvents, hvacEvents: hvacEvents,
             location: home.clLocation)
         let (train, test) = IndoorModelEstimator.split(observations)
-        guard let selection = IndoorModelEstimator.selectModel(train: train, test: test) else {
+        // Off the main thread. The search refits the model a few hundred
+        // times — about a second in an optimised build, closer to half a
+        // minute in a Debug one — and while it ran on the main thread nothing
+        // else could happen, scrolling included.
+        let selection = await Task.detached(priority: .userInitiated) {
+            IndoorModelEstimator.selectModel(train: train, test: test)
+        }.value
+        guard generation == fitGeneration else { return }
+        guard let selection else {
             report = nil
             exportFile = writeExport(readings)
             return
@@ -546,43 +489,6 @@ struct ModelReportView: View {
                                  model: report?.model).write()
     }
 
-    // MARK: - Event timeline
-
-    private struct Entry: Identifiable {
-        /// The stored record's own identity. This was a fresh UUID on every
-        /// render, so each redraw looked to SwiftUI like every row being
-        /// removed and re-added — discarding a half-open swipe-to-delete, which
-        /// is why it flicked in and out.
-        let id: PersistentIdentifier
-        let date: Date
-        let title: String
-        let setpoint: Double?
-        let inferred: Bool
-        var cooler: CoolerEvent?
-        var hvac: HVACEvent?
-    }
-
-    /// Both event kinds merged, newest first.
-    private var timeline: [Entry] {
-        var all: [Entry] = coolerEvents.map {
-            Entry(id: $0.persistentModelID, date: $0.date,
-                  title: $0.isOn ? "Evaporative cooler on" : "Evaporative cooler off",
-                  setpoint: nil, inferred: $0.source == 1, cooler: $0)
-        }
-        all += hvacEvents.map {
-            let title: String
-            switch $0.mode {
-            case -1: title = "Unknown — excluded from the model"
-            case 1:  title = "Heating on"
-            case 2:  title = "Air conditioning on"
-            case 3:  title = "Vent (cooler, no water)"
-            default: title = "Nothing running"
-            }
-            return Entry(id: $0.persistentModelID, date: $0.date, title: title,
-                         setpoint: $0.targetTempC, inferred: $0.source == 1, hvac: $0)
-        }
-        return all.sorted { $0.date > $1.date }
-    }
 
     // MARK: - Helpers
 

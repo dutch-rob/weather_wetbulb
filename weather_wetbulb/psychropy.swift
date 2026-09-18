@@ -5,7 +5,7 @@ import Foundation
 /// - pressure in pascals
 /// - dry-bulb temperature in Fahrenheit
 /// - relative humidity as a fraction (`0.55`) or percent (`55`)
-enum PsychrometryCalculator {
+nonisolated enum PsychrometryCalculator {
     /// Saturation vapor pressure in kPa.
     /// Source: ASHRAE Fundamentals (2005), SI Edition, equations 5 and 6.
     static func satPress(_ dryBulbCelsius: Double) -> Double {

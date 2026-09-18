@@ -43,6 +43,7 @@ struct ContentView: View {
     @State private var tableTopDate: Date? = nil
     /// Model report sheet, reachable from the graph screen's left button.
     @State private var showModelReport = false
+    @State private var showEvents = false
     /// Which graph to come back to from the table.
     @State private var lastGraph: ForecastScreen = .today
 
@@ -346,6 +347,7 @@ struct ContentView: View {
     /// impractical for reaching a screen now that the graphs scroll ten days.
     private func headerBar(_ title: String,
                            left: (String, () -> Void)? = nil,
+                           nextToLeft: (String, () -> Void)? = nil,
                            right: (String, () -> Void)? = nil) -> some View {
         VStack(spacing: 0) {
             ZStack {
@@ -353,9 +355,13 @@ struct ContentView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.65)
                     .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 78)
+                    // Symmetric, so the title stays centred whichever side is fuller.
+                    .padding(.horizontal, nextToLeft == nil ? 78 : 130)
                 HStack {
-                    if let left { Button(left.0) { left.1() } }
+                    HStack(spacing: 16) {
+                        if let left { Button(left.0) { left.1() } }
+                        if let nextToLeft { Button(nextToLeft.0) { nextToLeft.1() } }
+                    }
                     Spacer()
                     if let right { Button(right.0) { right.1() } }
                 }
@@ -500,6 +506,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             headerBar("graph",
                       left: ("model", { showModelReport = true }),
+                      nextToLeft: ("events", { showEvents = true }),
                       right: showTable ? ("table", { goToTable() }) : nil)
             FoldTimelineView(
                 series: weather.isRefreshing ? [] : panSeries,
@@ -518,6 +525,9 @@ struct ContentView: View {
             ModelReportView(series: weather.seriesFull,
                             location: selectedPlace?.clLocation ?? locationProvider.currentLocation,
                             places: places)
+        }
+        .sheet(isPresented: $showEvents) {
+            EventsView()
         }
     }
 }

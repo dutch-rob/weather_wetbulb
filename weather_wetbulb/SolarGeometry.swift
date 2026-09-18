@@ -17,7 +17,7 @@
 
 import Foundation
 
-enum SolarGeometry {
+nonisolated enum SolarGeometry {
 
     /// Where the sun is: how high, and in which direction.
     ///

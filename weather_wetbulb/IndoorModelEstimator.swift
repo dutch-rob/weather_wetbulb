@@ -15,7 +15,7 @@
 
 import Foundation
 
-enum IndoorModelEstimator {
+nonisolated enum IndoorModelEstimator {
 
     // MARK: - Train/test split
 

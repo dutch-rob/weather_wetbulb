@@ -56,7 +56,7 @@ import Foundation
 
 /// An outdoor variable that both WeatherKit and the station can supply, and so
 /// can be chosen per-variable when fitting.
-enum OutdoorVariable: String, CaseIterable, Sendable {
+nonisolated enum OutdoorVariable: String, CaseIterable, Sendable {
     case temperature
     case humidity
     case windSpeed
@@ -67,7 +67,7 @@ enum OutdoorVariable: String, CaseIterable, Sendable {
 }
 
 /// Where one outdoor variable's values come from.
-enum OutdoorSource: String, Sendable, Equatable {
+nonisolated enum OutdoorSource: String, Sendable, Equatable {
     /// Apple WeatherKit, interpolated to the observation time.
     case weatherKit
     /// The local station feed.
@@ -75,7 +75,7 @@ enum OutdoorSource: String, Sendable, Equatable {
 }
 
 /// Which source to use for each outdoor variable.
-struct OutdoorSourcePlan: Equatable, Sendable {
+nonisolated struct OutdoorSourcePlan: Equatable, Sendable {
     private(set) var sources: [OutdoorVariable: OutdoorSource]
 
     init(all source: OutdoorSource) {
@@ -117,7 +117,7 @@ struct OutdoorSourcePlan: Equatable, Sendable {
 /// any other daily rhythm — cooking, occupancy, habitual equipment use. What
 /// they recover is better described as "when in the day this house gains heat"
 /// than as pure solar exposure.
-enum SolarExposureEncoding: String, CaseIterable, Sendable {
+nonisolated enum SolarExposureEncoding: String, CaseIterable, Sendable {
     /// Roof only: no direction term.
     case none
     /// One sine/cosine pair, giving a single most-exposed bearing with the
@@ -174,7 +174,7 @@ enum SolarExposureEncoding: String, CaseIterable, Sendable {
 /// HVAC state over an observation interval. `.unknown` is its own case rather
 /// than a synonym for `.off`: treating unlabelled time as "off" would teach the
 /// model that cooling sometimes happens for no reason.
-enum HVACState: Int, Sendable, Equatable, CaseIterable {
+nonisolated enum HVACState: Int, Sendable, Equatable, CaseIterable {
     /// Explicitly not known. Rows carrying this are EXCLUDED from fitting
     /// rather than guessed at: a wrong label is worse than a missing one,
     /// because it teaches the model that equipment does something it didn't.
@@ -196,7 +196,7 @@ enum HVACState: Int, Sendable, Equatable, CaseIterable {
 /// Outdoor conditions from a single source at one instant. Optional throughout:
 /// the station does not report everything, and history for some fields only
 /// starts once the station app began publishing them.
-struct OutdoorValues: Sendable, Equatable {
+nonisolated struct OutdoorValues: Sendable, Equatable {
     var temperatureC: Double?
     var humidity: Double?          // percent, 0…100
     var windSpeedMS: Double?
@@ -228,7 +228,7 @@ struct OutdoorValues: Sendable, Equatable {
 
 /// One fitted row: the indoor state now, the indoor state at the next reading,
 /// and both candidate sets of outdoor conditions in between.
-struct IndoorObservation: Sendable {
+nonisolated struct IndoorObservation: Sendable {
     let date: Date
     /// Seconds to the next reading. Rates are per hour, so this is divided out.
     let dt: Double
@@ -283,7 +283,7 @@ struct IndoorObservation: Sendable {
 /// problem: raw degrees put 350 and 10 at opposite ends of the range although
 /// they are nearly the same direction, and the shape of the response is not
 /// known in advance.
-enum CircularBasis {
+nonisolated enum CircularBasis {
     /// Knots, from north, clockwise: N NE E SE S SW W NW.
     static let knotCount: Int = 8
 
@@ -328,7 +328,7 @@ enum CircularBasis {
 ///
 /// Both are fitted and compared on held-out error, because which is right
 /// depends on the house and cannot be known in advance.
-enum WindDirectionEncoding: String, CaseIterable, Sendable {
+nonisolated enum WindDirectionEncoding: String, CaseIterable, Sendable {
 
     /// One sine and one cosine term.
     ///
@@ -405,7 +405,7 @@ enum WindDirectionEncoding: String, CaseIterable, Sendable {
 /// The default is measured rather than assumed: supply air at 22.2 °C with
 /// 34.6 °C outdoor and a 19.7 °C wet bulb gives 0.83, in the usual 0.75–0.90
 /// band for this kind of cooler.
-struct CoolerEffectiveness: Sendable, Equatable, Codable {
+nonisolated struct CoolerEffectiveness: Sendable, Equatable, Codable {
     var fraction: Double = 0.83
 
     /// Temperature of the air the cooler delivers.
@@ -435,7 +435,7 @@ struct CoolerEffectiveness: Sendable, Equatable, Codable {
 /// hot days. That is modelled as a straight line in outdoor temperature,
 /// centred at 25 °C so `baseC` reads as "coil temperature on a 25 °C day"
 /// rather than an extrapolation to freezing.
-struct CoilTemperature: Sendable, Equatable, Codable {
+nonisolated struct CoilTemperature: Sendable, Equatable, Codable {
     /// Coil temperature when it is 25 °C outside.
     var baseC: Double = 7
     /// How much warmer the coil runs per degree of outdoor warmth.
@@ -461,7 +461,7 @@ struct CoilTemperature: Sendable, Equatable, Codable {
 ///
 /// Direction never acts alone: it always multiplies the wind term, because a
 /// bearing means nothing without a wind behind it.
-struct InfiltrationTerms {
+nonisolated struct InfiltrationTerms {
     /// Sustained wind, m/s.
     let wind: Double
     /// How much the gusts exceed the sustained wind. Gust and wind are strongly
@@ -513,7 +513,7 @@ struct InfiltrationTerms {
 
 // MARK: - Psychrometric helpers
 
-enum IndoorPsychrometrics {
+nonisolated enum IndoorPsychrometrics {
     /// Magnus-form dew point. psychropy.swift has saturation pressure and wet
     /// bulb but no inverse for dew point, and both feeds give temperature and
     /// relative humidity rather than dew point directly.
@@ -547,7 +547,7 @@ enum IndoorPsychrometrics {
 /// exists only to keep the solve stable when two columns are nearly collinear —
 /// which happens readily, e.g. wind and wind gust, or during a long stretch
 /// with the cooler never on so its column is all zeros.
-enum LeastSquares {
+nonisolated enum LeastSquares {
 
     /// Sign a coefficient is physically permitted to take.
     enum SignConstraint {
@@ -667,7 +667,7 @@ enum LeastSquares {
 
 /// A fitted indoor model: coefficients for the two rate equations, plus the
 /// plan that says where each outdoor variable came from.
-struct IndoorModel: Sendable, Equatable {
+nonisolated struct IndoorModel: Sendable, Equatable {
     var plan: OutdoorSourcePlan
     /// How wind direction entered this fit.
     var encoding: WindDirectionEncoding

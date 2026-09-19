@@ -78,13 +78,22 @@ struct ModelReportView: View {
                         } else {
                             unavailable
                         }
-                        exportSection
                     }
                 }
             }
             .navigationTitle("Model")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // The fit's inputs and output, for checking elsewhere. Beside
+                // the title rather than at the foot of the list, so it is
+                // reachable without scrolling past every section.
+                ToolbarItem(placement: .topBarLeading) {
+                    if let file = exportFile {
+                        ShareLink(item: file) {
+                            Label("Export model and data", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
@@ -325,17 +334,6 @@ struct ModelReportView: View {
         }
     }
 
-    /// The fit's inputs and output, for checking elsewhere.
-    @ViewBuilder
-    private var exportSection: some View {
-        if let file = exportFile {
-            Section {
-                ShareLink(item: file) {
-                    Label("Export model and data", systemImage: "square.and.arrow.up")
-                }
-            }
-        }
-    }
 
 
     private var unavailable: some View {

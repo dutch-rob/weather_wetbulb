@@ -223,8 +223,12 @@ struct ModelReportView: View {
             if let first = r.observations.first?.date, let last = r.observations.last?.date {
                 row("Span", "\(Self.stamp(first)) → \(Self.stamp(last))")
             }
-            row("Wind direction as", r.model.encoding == .harmonic
-                ? "sine/cosine pair" : "8-point cyclic spline")
+            if r.observationCount(for: .airConditioning) > 0 {
+                row("AC at full power", String(format: "%.1f °C/h", r.model.thermostat.capacityCPerHour))
+            }
+            row("Slow parts, τ", String(format: "mass %.0f h, envelope %.0f h, moisture %.0f h",
+                                        ThermalLags.indoorMassHours, ThermalLags.envelopeHours,
+                                        ThermalLags.slowMoistureHours))
             row("Held-out error, temp", String(format: "%.3f °C/h", r.model.score.temperatureRMSE))
             row("Held-out error, dew pt", String(format: "%.3f °C/h", r.model.score.dewPointRMSE))
             row("Combined", String(format: "%.3f", r.model.score.combined))

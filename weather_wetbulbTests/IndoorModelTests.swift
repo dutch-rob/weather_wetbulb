@@ -139,8 +139,8 @@ struct IndoorModelTests {
     @Test func coolerCanNeverBeFittedAsAHeater() {
         // The constraint that matters most: whatever the residuals look like,
         // running a swamp cooler must never come out as warming the house.
-        let constraints = IndoorModel.temperatureConstraints(.harmonic)
-        let count = 13                              // harmonic temperature width
+        let constraints = IndoorModel.temperatureConstraints(.none)
+        let count = 9                               // four passive terms plus five for equipment
         #expect(constraints.count == count)
         let coolerIndex = IndoorModel.equipmentIndex(.evaporativeCooler, in: count)!
         let heatIndex = IndoorModel.equipmentIndex(.heating, in: count)!
@@ -157,13 +157,10 @@ struct IndoorModelTests {
     /// recover these numbers.
     struct SyntheticHouse {
         var conduction = 0.35        // per hour, toward outdoor temperature
-        var solarGain = 1.8
+        var daytimeGain = 0.6        // °C per hour while the sun is up
+        var massCoupling = 0.12      // per hour, toward the slow indoor mass
         var moistureExchange = 0.5   // per hour, toward outdoor dew point
-        /// Undirected wind-driven infiltration, per (m/s . K . hour).
-        var windInfiltration = 0.0
-        /// How much infiltration depends on the wind's bearing. Non-zero means
-        /// wind from one direction leaks more than from the opposite one.
-        var windSinInfiltration = 0.0
+        var moistureBuffer = 0.25    // per hour, toward what the house holds
 
         /// Generate `count` observations at `stepSeconds` apart.
         ///
@@ -177,6 +174,9 @@ struct IndoorModelTests {
             var out: [IndoorObservation] = []
             var indoorT = 22.0
             var indoorD = 8.0
+            // The slow parts start where the house starts, and follow it from
+            // there, exactly as the builder walks them across real readings.
+            var lags = ThermalLags(indoorMassC: 22, envelopeC: 18, slowDewPointC: 8, fastDewPointC: 8)
             let start = Date(timeIntervalSince1970: 1_700_000_000)
             let hours = stepSeconds / 3600
 
@@ -200,11 +200,12 @@ struct IndoorModelTests {
                 let trueOutD = IndoorPsychrometrics.dewPointC(
                     temperatureC: trueOutT, relativeHumidity: trueOutRH) ?? 8
 
-                let dirRad = direction * .pi / 180
-                let infiltration = (windInfiltration + windSinInfiltration * sin(dirRad))
-                    * wind * (trueOutT - indoorT)
-                let rateT = conduction * (trueOutT - indoorT) + solarGain * solar + infiltration
+                let daylight: Double = solar > 0 ? 1 : 0
+                let rateT = conduction * (trueOutT - indoorT)
+                    + daytimeGain * daylight
+                    + massCoupling * (lags.indoorMassC - indoorT)
                 let rateD = moistureExchange * (trueOutD - indoorD)
+                    + moistureBuffer * (lags.slowDewPointC - indoorD)
                 let nextT = indoorT + rateT * hours
                 let nextD = indoorD + rateD * hours
 
@@ -232,7 +233,11 @@ struct IndoorModelTests {
                         rainfallMM: 0,
                         stationPressureHPa: 890),
                     solar: solar,
+                    solarVertical: 0, solarAzimuthDeg: nil, daylight: daylight,
+                    setpointC: nil, lags: lags, withinLagBurnIn: false,
                     hvac: hvac))
+                lags = lags.advanced(indoorTempC: indoorT, outdoorTempC: trueOutT,
+                                     indoorDewPointC: indoorD, dt: stepSeconds)
                 indoorT = nextT
                 indoorD = nextD
             }
@@ -240,46 +245,27 @@ struct IndoorModelTests {
         }
     }
 
-    @Test func fitRecoversTheHousesConductionAndSolarGain() {
+    @Test func fitRecoversConductionDaytimeGainAndTheSlowMass() {
         let house = SyntheticHouse()
-        let all = house.observations(count: 300)
+        let all = house.observations(count: 400)
         let (train, test) = IndoorModelEstimator.split(all)
         let model = IndoorModel.fit(train: train, test: test,
                                     plan: OutdoorSourcePlan(all: .weatherKit))
         #expect(model != nil)
         guard let model else { return }
 
-        // Index 1 is the (T_out - T_in) conduction coefficient, 2 the solar one;
-        // 3…6 are the infiltration terms and 7 rain, none of which drive the
-        // synthetic house, so they should come out near zero.
-        #expect(abs(model.temperature[1] - house.conduction) < 0.02)
-        #expect(abs(model.temperature[2] - house.solarGain) < 0.05)
-        #expect(abs(model.temperature[7]) < 0.05)          // no rain in fixture
-        // dewPoint[1] is the (D_out - D_in) coefficient.
-        #expect(abs(model.dewPoint[1] - house.moistureExchange) < 0.02)
+        // Passive temperature columns, in order: conduction, daytime, indoor
+        // mass, envelope. The house has no envelope term, so that one should
+        // come out small.
+        #expect(abs(model.temperature[0] - house.conduction) < 0.03)
+        #expect(abs(model.temperature[1] - house.daytimeGain) < 0.08)
+        #expect(abs(model.temperature[2] - house.massCoupling) < 0.05)
+        #expect(model.temperature[3] < 0.1)
+        // Dew point: exchange first, then the slow buffer.
+        #expect(abs(model.dewPoint[0] - house.moistureExchange) < 0.03)
+        #expect(abs(model.dewPoint[1] - house.moistureBuffer) < 0.05)
         // A house generated by the model's own equations should fit almost
         // exactly on held-out data.
-        #expect(model.score.temperatureRMSE < 0.05)
-    }
-
-    @Test func fitRecoversDirectionDependentInfiltration() {
-        // A house that leaks more when the wind comes from one side. Raw
-        // degrees could not express this: 350 and 10 would sit at opposite ends
-        // of the range despite being nearly the same wind. The sin/cos pair can.
-        var house = SyntheticHouse()
-        house.windInfiltration = 0.10
-        house.windSinInfiltration = 0.08
-        let all = house.observations(count: 400)
-        let (train, test) = IndoorModelEstimator.split(all)
-        guard let model = IndoorModel.fit(train: train, test: test,
-                                          plan: OutdoorSourcePlan(all: .weatherKit))
-        else { #expect(Bool(false)); return }
-
-        // Index 3 is wind x gap, 5 is wind x gap x sin(direction), 6 the cosine
-        // partner — which this house does not use, so it should stay near zero.
-        #expect(abs(model.temperature[3] - house.windInfiltration) < 0.02)
-        #expect(abs(model.temperature[5] - house.windSinInfiltration) < 0.02)
-        #expect(abs(model.temperature[6]) < 0.02)
         #expect(model.score.temperatureRMSE < 0.05)
     }
 

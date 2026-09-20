@@ -228,6 +228,90 @@ nonisolated struct OutdoorValues: Sendable, Equatable {
 
 /// One fitted row: the indoor state now, the indoor state at the next reading,
 /// and both candidate sets of outdoor conditions in between.
+/// The house's slow parts, carried as state beside the room's own readings.
+///
+/// Each is a first-order lag — m += (1 − e^(−Δt/τ))(x − m) — and each stands
+/// for something real: the indoor mass is the furniture, floors and inner
+/// walls the room exchanges heat with; the envelope is the outer fabric,
+/// which follows outdoor air hours behind; the two moisture buffers are
+/// everything in the house that holds and releases water.
+///
+/// The time constants are fixed rather than fitted. A fortnight of readings
+/// cannot tell 64 hours from longer, and a time constant that moved with every
+/// refit would make the forecast jump about. They were chosen by forecast
+/// score offline — see the stepwise tool in the analysis repository — and
+/// should be revisited there as the record grows, not tuned here.
+nonisolated struct ThermalLags: Sendable, Equatable, Codable {
+    static let indoorMassHours = 64.0
+    static let envelopeHours = 16.0
+    static let slowMoistureHours = 64.0
+    static let fastMoistureHours = 1.0
+
+    var indoorMassC: Double
+    var envelopeC: Double
+    var slowDewPointC: Double
+    var fastDewPointC: Double
+
+    /// Lags sitting exactly where the room is, so every lag term contributes
+    /// nothing. What a model falls back to when no history came with the row.
+    static func matching(_ o: IndoorObservation) -> ThermalLags {
+        ThermalLags(indoorMassC: o.indoorTempC, envelopeC: o.indoorTempC,
+                    slowDewPointC: o.indoorDewPointC, fastDewPointC: o.indoorDewPointC)
+    }
+
+    static func starting(indoorTempC: Double, outdoorTempC: Double?, indoorDewPointC: Double) -> ThermalLags {
+        ThermalLags(indoorMassC: indoorTempC, envelopeC: outdoorTempC ?? indoorTempC,
+                    slowDewPointC: indoorDewPointC, fastDewPointC: indoorDewPointC)
+    }
+
+    /// Advance every lag over `dt`, driven by the values at the step's start.
+    func advanced(indoorTempC: Double, outdoorTempC: Double?,
+                  indoorDewPointC: Double, dt: TimeInterval) -> ThermalLags {
+        let hours = dt / 3600
+        func lag(_ m: Double, toward x: Double, _ tau: Double) -> Double {
+            m + (1 - exp(-hours / tau)) * (x - m)
+        }
+        return ThermalLags(
+            indoorMassC: lag(indoorMassC, toward: indoorTempC, Self.indoorMassHours),
+            envelopeC: lag(envelopeC, toward: outdoorTempC ?? envelopeC, Self.envelopeHours),
+            slowDewPointC: lag(slowDewPointC, toward: indoorDewPointC, Self.slowMoistureHours),
+            fastDewPointC: lag(fastDewPointC, toward: indoorDewPointC, Self.fastMoistureHours))
+    }
+
+    /// Advance a lag driven only by outdoor air, for seeding the envelope from
+    /// weather that predates the first indoor reading.
+    func envelopeAdvanced(outdoorTempC: Double, dt: TimeInterval) -> ThermalLags {
+        var out = self
+        out.envelopeC += (1 - exp(-(dt / 3600) / Self.envelopeHours)) * (outdoorTempC - envelopeC)
+        return out
+    }
+}
+
+/// How the air conditioner follows its thermostat.
+///
+/// Above the setpoint it runs flat out and pulls the room down. At the
+/// setpoint it cycles, running whatever share of the time cancels the heat
+/// coming in — so on a hot afternoon it runs most of the time and dries hard,
+/// while on a mild evening it runs briefly and the dew point drifts back
+/// toward outdoors between cycles. That is why duty, not "the AC is on",
+/// multiplies both the cooling and the drying.
+nonisolated struct ACThermostat: Sendable, Equatable, Codable {
+    /// Cooling delivered at full duty, °C per hour. Estimated with the model:
+    /// it is what the duty coefficient measures.
+    var capacityCPerHour: Double = 1.0
+    /// How fast the thermostat is asked to close a gap to its setpoint. One
+    /// reading interval: any quicker and a 20-minute step would overshoot.
+    static let pullDownHours = 1.0 / 3.0
+
+    /// Share of the interval the compressor runs, 0…1.
+    func duty(indoorTempC: Double, setpointC: Double?, passiveRate: Double) -> Double {
+        // With no setpoint recorded there is nothing to hold, so assume it runs.
+        guard let setpointC else { return 1 }
+        let demand = passiveRate + (indoorTempC - setpointC) / Self.pullDownHours
+        return min(max(demand / max(capacityCPerHour, 0.05), 0), 1)
+    }
+}
+
 nonisolated struct IndoorObservation: Sendable {
     let date: Date
     /// Seconds to the next reading. Rates are per hour, so this is divided out.
@@ -250,6 +334,17 @@ nonisolated struct IndoorObservation: Sendable {
     var solarVertical: Double = 0
     /// Compass bearing of the sun, nil at night.
     var solarAzimuthDeg: Double?
+    /// 1 between sunrise and sunset, 0 at night. The daytime gain turns out to
+    /// be squarer than the sun's own arc — people, appliances and windows all
+    /// follow the day rather than the solar elevation.
+    var daylight: Double = 0
+    /// Thermostat setting in force, when one was recorded with the event.
+    var setpointC: Double?
+    /// The house's slow parts at this moment, from the readings before it.
+    var lags: ThermalLags?
+    /// True while the lags are still forgetting where they were started, which
+    /// is a day or so. Such rows are dropped from fitting when enough remain.
+    var withinLagBurnIn = false
     let hvac: HVACState
 
     /// Outdoor values under a given plan, variable by variable.
@@ -481,33 +576,23 @@ nonisolated struct InfiltrationTerms {
         rain = o.rainfallMM ?? 0
     }
 
-    /// Terms that scale with a driving gradient (the indoor-outdoor temperature
-    /// or dew point difference), in a fixed order.
+    /// Wind, gust and bearing taken from ONE source.
     ///
-    /// Note what the tent basis does NOT include: a separate undirected
-    /// `wind * gradient` column. The eight tent weights sum to 1 for every
-    /// observation, so those columns would add up to exactly that term and the
-    /// design would be singular. Dropping it lets the eight coefficients carry
-    /// the wind effect outright, each reading as "infiltration per unit wind
-    /// per degree of gap, for wind from this bearing". The harmonic encoding
-    /// has no such problem — sine and cosine sum to nothing constant — so it
-    /// keeps the undirected term as its baseline.
-    func scaled(by gradient: Double, encoding: WindDirectionEncoding) -> [Double] {
-        let driven = wind * gradient
-        switch encoding {
-        case .harmonic:
-            let radians = (directionDegrees ?? 0) * .pi / 180
-            // With no bearing the modulation vanishes and the undirected term
-            // carries the effect on its own.
-            let known = directionDegrees != nil
-            return [driven,
-                    gustExcess * gradient,
-                    known ? driven * sin(radians) : 0,
-                    known ? driven * cos(radians) : 0]
-        case .tentBasis:
-            return [gustExcess * gradient]
-                + WindDirectionEncoding.tentWeights(directionDegrees).map { $0 * driven }
-        }
+    /// The plan picks a source per variable, which once left the model with
+    /// gusts from the station and sustained wind from WeatherKit. Their
+    /// difference was zero in half the readings — not because the air was
+    /// still, but because the two sources disagree about the wind's level, the
+    /// station sitting low behind a wall. Gustiness is a difference, so both
+    /// sides of it have to come from the same instrument.
+    init(_ o: IndoorObservation, _ plan: OutdoorSourcePlan) {
+        let primary = plan[.windSpeed] == .weatherKit ? o.weatherKit : o.station
+        let fallback = plan[.windSpeed] == .weatherKit ? o.station : o.weatherKit
+        let source = primary.windSpeedMS != nil ? primary : fallback
+        let w = source.windSpeedMS ?? 0
+        wind = w
+        gustExcess = max(0, (source.windGustMS ?? w) - w)
+        directionDegrees = source.windDirectionDeg
+        rain = source.rainfallMM ?? 0
     }
 }
 
@@ -669,14 +754,14 @@ nonisolated enum LeastSquares {
 /// plan that says where each outdoor variable came from.
 nonisolated struct IndoorModel: Sendable, Equatable {
     var plan: OutdoorSourcePlan
-    /// How wind direction entered this fit.
-    var encoding: WindDirectionEncoding
     /// Coil model used for the AC's latent term.
     var coil: CoilTemperature
     /// How completely the swamp cooler saturates its air.
     var cooler: CoolerEffectiveness
     /// How the sun's direction enters, on top of its height.
     var exposure: SolarExposureEncoding
+    /// How the AC follows its setpoint, including the capacity fitted with it.
+    var thermostat: ACThermostat = ACThermostat()
     /// Coefficients of the dT_in/dt equation, in `temperatureFeatures` order.
     var temperature: [Double]
     /// Coefficients of the dD_in/dt equation, in `dewPointFeatures` order.
@@ -735,74 +820,107 @@ nonisolated struct IndoorModel: Sendable, Equatable {
     }
 
     // MARK: Feature construction
+    //
+    // The model is in two halves, fitted separately.
+    //
+    // The PASSIVE half is the house with nothing running: conduction to the
+    // outdoor air, the daytime gain, the sun by the bearing it comes from, and
+    // the building's slow parts carried as lagged state. Dew point has the
+    // same shape, with two moisture buffers standing in for everything in the
+    // house that holds water.
+    //
+    // The EQUIPMENT half is what each machine adds on top, fitted on what the
+    // passive half leaves unexplained during that machine's own hours. Fitting
+    // the two together let one absorb the other's misfit, which is how an AC
+    // coefficient once came out at zero.
 
-    /// dT_in/dt design row. Order must match `temperature`.
-    static func temperatureFeatures(_ o: IndoorObservation,
-                                    _ plan: OutdoorSourcePlan,
-                                    _ encoding: WindDirectionEncoding,
-                                    _ coil: CoilTemperature,
-                                    _ cooler: CoolerEffectiveness,
-                                    _ exposure: SolarExposureEncoding) -> [Double]? {
+    /// Columns the equipment half contributes to either equation.
+    static let equipmentColumns = 5
+
+    /// dT_in/dt passive row. Order must match the head of `temperature`.
+    static func passiveTemperatureRow(_ o: IndoorObservation,
+                                      _ plan: OutdoorSourcePlan,
+                                      _ exposure: SolarExposureEncoding) -> [Double]? {
         let out = o.outdoor(plan)
-        guard let tOut = out.temperatureC, let rhOut = out.humidity else { return nil }
-        let gap = tOut - o.indoorTempC
-        let wetBulb = IndoorPsychrometrics.wetBulbC(
-            temperatureC: tOut, relativeHumidity: rhOut,
-            pressureHPa: out.stationPressureHPa) ?? tOut
-        let terms = InfiltrationTerms(out)
-        return [1, gap, o.solar]
+        guard let tOut = out.temperatureC else { return nil }
+        let lags = o.lags ?? ThermalLags.matching(o)
+        return [tOut - o.indoorTempC,
+                o.daylight,
+                lags.indoorMassC - o.indoorTempC]
             + exposure.columns(vertical: o.solarVertical, azimuthDegrees: o.solarAzimuthDeg)
-            + terms.scaled(by: gap, encoding: encoding)
-            + [terms.rain,
-               // Energy spent condensing water is energy not spent lowering
-               // the temperature, so this is expected to come out POSITIVE:
-               // the harder the AC is drying, the less it cools.
-               o.hvac == .airConditioning
-                   ? coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut) : 0,
-               o.hvac == .evaporativeCooler
-                   ? (cooler.supplyTemperatureC(outdoorC: tOut, wetBulbC: wetBulb) - o.indoorTempC)
-                   : 0,
-               // Venting drags the inside toward the outside AIR temperature,
-               // not the wet-bulb: there is no evaporation without water.
-               o.hvac == .vent ? gap : 0,
-               o.hvac == .airConditioning ? 1 : 0,
-               o.hvac == .heating ? 1 : 0]
+            + [lags.envelopeC - o.indoorTempC]
     }
 
-    /// dD_in/dt design row. Order must match `dewPoint`.
-    static func dewPointFeatures(_ o: IndoorObservation,
-                                 _ plan: OutdoorSourcePlan,
-                                 _ encoding: WindDirectionEncoding,
-                                 _ coil: CoilTemperature,
-                                 _ cooler: CoolerEffectiveness,
-                                 _ exposure: SolarExposureEncoding) -> [Double]? {
+    /// dDp_in/dt passive row. Order must match the head of `dewPoint`.
+    static func passiveDewPointRow(_ o: IndoorObservation, _ plan: OutdoorSourcePlan) -> [Double]? {
         let out = o.outdoor(plan)
         guard let tOut = out.temperatureC, let rhOut = out.humidity,
-              let dOut = IndoorPsychrometrics.dewPointC(
-                temperatureC: tOut, relativeHumidity: rhOut) else { return nil }
-        let wetBulb = IndoorPsychrometrics.wetBulbC(
-            temperatureC: tOut, relativeHumidity: rhOut,
-            pressureHPa: out.stationPressureHPa) ?? tOut
-        // The same air leakage that carries heat carries moisture, so the
-        // infiltration terms appear here too, driven by the dew point gradient.
-        let terms = InfiltrationTerms(out)
+              let dOut = IndoorPsychrometrics.dewPointC(temperatureC: tOut, relativeHumidity: rhOut)
+        else { return nil }
+        let lags = o.lags ?? ThermalLags.matching(o)
         let gradient = dOut - o.indoorDewPointC
-        return [1, gradient]
-            + terms.scaled(by: gradient, encoding: encoding)
-            + [terms.rain,
-               // Drying happens only while the dew point is above the coil,
-               // and stops as it approaches it. Expected NEGATIVE: this is the
-               // moisture being removed.
-               o.hvac == .airConditioning
-                   ? coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut) : 0,
-               o.hvac == .evaporativeCooler
-                   ? (cooler.supplyDewPointC(outdoorDewPointC: dOut, wetBulbC: wetBulb) - o.indoorDewPointC)
-                   : 0,
-               // Venting exchanges moisture with outside air without adding
-               // any, so it pulls toward the outdoor dew point.
-               o.hvac == .vent ? gradient : 0,
-               o.hvac == .airConditioning ? 1 : 0,
-               o.hvac == .heating ? 1 : 0]
+        let wind = InfiltrationTerms(o, plan)
+        return [gradient,
+                lags.slowDewPointC - o.indoorDewPointC,
+                1,
+                wind.wind * gradient,
+                wind.gustExcess * gradient,
+                lags.fastDewPointC - o.indoorDewPointC]
+    }
+
+    /// What the running equipment adds to dT_in/dt, given what the passive
+    /// half says the room is doing. Order must match the tail of `temperature`.
+    static func equipmentTemperatureRow(_ o: IndoorObservation,
+                                        _ plan: OutdoorSourcePlan,
+                                        _ coil: CoilTemperature,
+                                        _ cooler: CoolerEffectiveness,
+                                        _ thermostat: ACThermostat,
+                                        passiveRate: Double) -> [Double]? {
+        let out = o.outdoor(plan)
+        guard let tOut = out.temperatureC, let rhOut = out.humidity else { return nil }
+        let wetBulb = IndoorPsychrometrics.wetBulbC(temperatureC: tOut, relativeHumidity: rhOut,
+                                                    pressureHPa: out.stationPressureHPa) ?? tOut
+        let duty = o.hvac == .airConditioning
+            ? thermostat.duty(indoorTempC: o.indoorTempC, setpointC: o.setpointC, passiveRate: passiveRate)
+            : 0
+        return [// Energy spent condensing water is energy not spent cooling, so
+                // this is expected POSITIVE: the harder it dries, the less it cools.
+                duty * coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut),
+                o.hvac == .evaporativeCooler
+                    ? cooler.supplyTemperatureC(outdoorC: tOut, wetBulbC: wetBulb) - o.indoorTempC : 0,
+                // Venting drags the room toward outdoor AIR temperature: there
+                // is no evaporation without water.
+                o.hvac == .vent ? tOut - o.indoorTempC : 0,
+                duty,
+                o.hvac == .heating ? 1 : 0]
+    }
+
+    /// The same for dDp_in/dt.
+    static func equipmentDewPointRow(_ o: IndoorObservation,
+                                     _ plan: OutdoorSourcePlan,
+                                     _ coil: CoilTemperature,
+                                     _ cooler: CoolerEffectiveness,
+                                     _ thermostat: ACThermostat,
+                                     passiveRate: Double) -> [Double]? {
+        let out = o.outdoor(plan)
+        guard let tOut = out.temperatureC, let rhOut = out.humidity,
+              let dOut = IndoorPsychrometrics.dewPointC(temperatureC: tOut, relativeHumidity: rhOut)
+        else { return nil }
+        let wetBulb = IndoorPsychrometrics.wetBulbC(temperatureC: tOut, relativeHumidity: rhOut,
+                                                    pressureHPa: out.stationPressureHPa) ?? tOut
+        let duty = o.hvac == .airConditioning
+            ? thermostat.duty(indoorTempC: o.indoorTempC, setpointC: o.setpointC, passiveRate: passiveRate)
+            : 0
+        return [// Drying happens only while the compressor runs and only while
+                // the dew point is above the coil. Between cycles the passive
+                // terms take it back toward outdoors, which is why the duty
+                // matters rather than merely "the AC is on".
+                duty * coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut),
+                o.hvac == .evaporativeCooler
+                    ? cooler.supplyDewPointC(outdoorDewPointC: dOut, wetBulbC: wetBulb) - o.indoorDewPointC : 0,
+                o.hvac == .vent ? dOut - o.indoorDewPointC : 0,
+                duty,
+                o.hvac == .heating ? 1 : 0]
     }
 
     /// Observed rates, per hour.
@@ -815,40 +933,30 @@ nonisolated struct IndoorModel: Sendable, Equatable {
 
     // MARK: Labels
 
+    static let equipmentLabels = ["AC dehumidifying", "evaporative cooler",
+                                  "vent (cooler, dry)", "air conditioning", "heating"]
+
     /// Human-readable names for `temperature`, in coefficient order.
     var temperatureLabels: [String] {
-        ["baseline drift", "conduction (out − in)", "solar gain (roof)"]
+        ["conduction (out − in)", "daytime gain",
+         String(format: "slow indoor mass (τ %.0f h)", ThermalLags.indoorMassHours)]
             + exposure.labels
-            + Self.infiltrationLabels(encoding, gradient: "ΔT")
-            + ["rain", "AC dehumidifying", "evaporative cooler",
-               "vent (cooler, dry)", "air conditioning", "heating"]
+            + [String(format: "envelope, lagged outdoor (τ %.0f h)", ThermalLags.envelopeHours)]
+            + Self.equipmentLabels
     }
 
     /// Human-readable names for `dewPoint`, in coefficient order.
     var dewPointLabels: [String] {
-        ["baseline drift", "moisture exchange (out − in)"]
-            + Self.infiltrationLabels(encoding, gradient: "ΔDp")
-            + ["rain", "AC dehumidifying", "evaporative cooler",
-               "vent (cooler, dry)", "air conditioning", "heating"]
+        ["moisture exchange (out − in)",
+         String(format: "slow moisture buffer (τ %.0f h)", ThermalLags.slowMoistureHours),
+         "baseline moisture (occupants)",
+         "wind × ΔDp", "gustiness × ΔDp",
+         String(format: "fast moisture buffer (τ %.0f h)", ThermalLags.fastMoistureHours)]
+            + Self.equipmentLabels
     }
 
-    private static func infiltrationLabels(_ encoding: WindDirectionEncoding,
-                                           gradient: String) -> [String] {
-        switch encoding {
-        case .harmonic:
-            return ["wind × \(gradient)", "gustiness × \(gradient)",
-                    "wind × \(gradient) × sin(dir)", "wind × \(gradient) × cos(dir)"]
-        case .tentBasis:
-            return ["gustiness × \(gradient)"]
-                + ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-                    .map { "wind × \(gradient) from \($0)" }
-        }
-    }
-
-    /// Index of the coefficient for a given piece of equipment, in both
-    /// equations the last three entries.
-    /// Equipment coefficients occupy the last four slots of either equation,
-    /// in this order.
+    /// Index of the coefficient for a given piece of equipment. Equipment
+    /// occupies the last four slots of either equation, in this order.
     static let equipmentOrder: [HVACState] = [.evaporativeCooler, .vent,
                                               .airConditioning, .heating]
 
@@ -858,16 +966,13 @@ nonisolated struct IndoorModel: Sendable, Equatable {
     }
 
     /// What physics permits each temperature coefficient to be.
-    ///
-    /// Only the terms whose direction is genuinely certain are constrained.
-    /// Wind-direction modulation can legitimately be negative — some bearings
-    /// leak less than average — and rain and the baseline are left free.
-    static func temperatureConstraints(_ encoding: WindDirectionEncoding,
-                                       _ exposure: SolarExposureEncoding = .none) -> [LeastSquares.SignConstraint] {
-        let infiltrationCount = encoding == .harmonic ? 4 : 9
-        // Exposure columns are left free for the harmonic pair, whose signs
-        // encode a bearing rather than a direction of effect. The tent knots
-        // are each a real gain and cannot be negative.
+    static func temperatureConstraints(_ exposure: SolarExposureEncoding) -> [LeastSquares.SignConstraint] {
+        passiveTemperatureConstraints(exposure) + equipmentTemperatureConstraints
+    }
+    static func passiveTemperatureConstraints(_ exposure: SolarExposureEncoding) -> [LeastSquares.SignConstraint] {
+        // Exposure columns are free for the harmonic pair, whose signs encode a
+        // bearing rather than a direction of effect. Tent knots are each a real
+        // gain and cannot be negative.
         let exposureConstraints: [LeastSquares.SignConstraint]
         switch exposure {
         case .none:      exposureConstraints = []
@@ -875,115 +980,144 @@ nonisolated struct IndoorModel: Sendable, Equatable {
         case .tentBasis: exposureConstraints = [LeastSquares.SignConstraint](
                             repeating: .nonNegative, count: CircularBasis.knotCount)
         }
-        return [.free,          // baseline drift
-                .nonNegative,   // conduction: heat flows toward the outside
-                .nonNegative]   // solar gain warms
+        return [.nonNegative,   // conduction: heat flows toward the outside
+                .nonNegative,   // daylight warms
+                .nonNegative]   // the mass gives heat back toward the room
             + exposureConstraints
-            + [LeastSquares.SignConstraint](repeating: .free, count: infiltrationCount)
-            + [.free,           // rain
-               .nonNegative,    // AC drying costs cooling power
-               .nonNegative,    // cooler pulls toward its supply air
-               .nonNegative,    // vent pulls toward outdoor
-               .nonPositive,    // AC cools
-               .nonNegative]    // heating warms
+            + [.nonNegative]    // so does the envelope
     }
+    static let equipmentTemperatureConstraints: [LeastSquares.SignConstraint] = [
+        .nonNegative,   // AC drying costs cooling power
+        .nonNegative,   // cooler pulls toward its supply air
+        .nonNegative,   // vent pulls toward outdoor
+        .nonPositive,   // AC cools
+        .nonNegative,   // heating warms
+    ]
 
     /// The same for the dew point equation.
-    static func dewPointConstraints(_ encoding: WindDirectionEncoding) -> [LeastSquares.SignConstraint] {
-        let infiltrationCount = encoding == .harmonic ? 4 : 9
-        return [.free,          // baseline drift
-                .nonNegative]   // moisture moves toward the outdoor dew point
-            + [LeastSquares.SignConstraint](repeating: .free, count: infiltrationCount)
-            + [.free,           // rain
-               .nonPositive,    // AC condenses moisture out
-               .nonNegative,    // cooler adds moisture toward its supply dew point
-               .nonNegative,    // vent pulls toward outdoor
-               .free,           // AC constant: mostly latent, sign not certain
-               .free]           // heating should not move moisture at all
+    static func dewPointConstraints() -> [LeastSquares.SignConstraint] {
+        passiveDewPointConstraints + equipmentDewPointConstraints
     }
+    static let passiveDewPointConstraints: [LeastSquares.SignConstraint] = [
+        .nonNegative,   // moisture moves toward the outdoor dew point
+        .nonNegative,   // and toward what the house has been holding
+        .free,          // occupants add moisture; an empty house loses it
+        .free, .free,   // wind and gustiness modulate the exchange
+        .nonNegative,   // the fast buffer, likewise
+    ]
+    static let equipmentDewPointConstraints: [LeastSquares.SignConstraint] = [
+        .nonPositive,   // the AC condenses moisture out
+        .nonNegative,   // the cooler adds moisture toward its supply dew point
+        .nonNegative,   // venting pulls toward outdoor
+        .free,          // what the AC does beyond the coil term
+        .free,          // heating should not move moisture at all
+    ]
 
     // MARK: Fitting
 
     /// Fit both equations on `train` and score on `test`.
     ///
-    /// Returns nil when either equation cannot be fitted — too few usable rows,
-    /// or a singular design.
+    /// The passive half is fitted on the stretches with nothing running; each
+    /// machine is then fitted on the residual of its own hours. The AC's duty
+    /// depends on its capacity, and its capacity is what the duty coefficient
+    /// measures, so the two are settled by repeating the fit a few times.
     static func fit(train: [IndoorObservation],
                     test: [IndoorObservation],
                     plan: OutdoorSourcePlan,
-                    encoding: WindDirectionEncoding = .harmonic,
                     coil: CoilTemperature = CoilTemperature(),
                     cooler: CoolerEffectiveness = CoolerEffectiveness(),
                     exposure: SolarExposureEncoding = .none,
+                    thermostat: ACThermostat = ACThermostat(),
                     now: Date = .now) -> IndoorModel? {
 
-        func assemble(_ rows: [IndoorObservation],
-                      _ features: (IndoorObservation, OutdoorSourcePlan, WindDirectionEncoding, CoilTemperature, CoolerEffectiveness, SolarExposureEncoding) -> [Double]?,
-                      _ target: (IndoorObservation) -> Double) -> ([[Double]], [Double]) {
-            var x: [[Double]] = [], y: [Double] = []
-            for o in rows {
-                // An unknown label means the equipment state was not recorded.
-                // Fitting such a row would attribute whatever happened to the
-                // passive terms, which is exactly the error the label exists to
-                // avoid.
-                guard o.hvac != .unknown else { continue }
-                guard let f = features(o, plan, encoding, coil, cooler, exposure) else { continue }
-                let t = target(o)
-                guard t.isFinite, f.allSatisfy(\.isFinite) else { continue }
-                x.append(f); y.append(t)
-            }
-            return (x, y)
+        // Rows whose lags still remember where they were started teach the
+        // model the seed rather than the house, so they are left out — unless
+        // dropping them would leave too little to fit, which is the case in the
+        // first days of a new installation.
+        let known = train.filter { $0.hvac != .unknown }
+        let seasoned = known.filter { !$0.withinLagBurnIn }
+        let usable = seasoned.filter { $0.hvac == .off }.count >= 30 ? seasoned : known
+        let passiveRows = usable.filter { $0.hvac == .off }
+        var xT: [[Double]] = [], yT: [Double] = [], xD: [[Double]] = [], yD: [Double] = []
+        for o in passiveRows {
+            guard let rt = passiveTemperatureRow(o, plan, exposure),
+                  let rd = passiveDewPointRow(o, plan) else { continue }
+            let tT = temperatureTarget(o), tD = dewPointTarget(o)
+            guard tT.isFinite, tD.isFinite, rt.allSatisfy(\.isFinite), rd.allSatisfy(\.isFinite) else { continue }
+            xT.append(rt); yT.append(tT); xD.append(rd); yD.append(tD)
         }
-
-        let (xT, yT) = assemble(train, temperatureFeatures, temperatureTarget)
-        let (xD, yD) = assemble(train, dewPointFeatures, dewPointTarget)
-        guard let betaT = LeastSquares.fit(x: xT, y: yT,
-                                           constraints: temperatureConstraints(encoding, exposure)),
-              let betaD = LeastSquares.fit(x: xD, y: yD,
-                                           constraints: dewPointConstraints(encoding))
+        guard let passiveT = LeastSquares.fit(x: xT, y: yT, constraints: passiveTemperatureConstraints(exposure)),
+              let passiveD = LeastSquares.fit(x: xD, y: yD, constraints: passiveDewPointConstraints)
         else { return nil }
 
-        let (txT, tyT) = assemble(test, temperatureFeatures, temperatureTarget)
-        let (txD, tyD) = assemble(test, dewPointFeatures, dewPointTarget)
-        guard let score = score(txT, tyT, betaT, txD, tyD, betaD) else { return nil }
+        let equipmentRows = usable.filter { $0.hvac != .off }
+        var thermo = thermostat
+        var equipmentT = [Double](repeating: 0, count: equipmentColumns)
+        var equipmentD = equipmentT
+        if equipmentRows.count > equipmentColumns + 1 {
+            for _ in 0..<3 {
+                var eT: [[Double]] = [], eD: [[Double]] = [], rT: [Double] = [], rD: [Double] = []
+                for o in equipmentRows {
+                    guard let pt = passiveTemperatureRow(o, plan, exposure),
+                          let pd = passiveDewPointRow(o, plan) else { continue }
+                    let passiveRate = zip(pt, passiveT).reduce(0) { $0 + $1.0 * $1.1 }
+                    let passiveRateD = zip(pd, passiveD).reduce(0) { $0 + $1.0 * $1.1 }
+                    guard let rowT = equipmentTemperatureRow(o, plan, coil, cooler, thermo, passiveRate: passiveRate),
+                          let rowD = equipmentDewPointRow(o, plan, coil, cooler, thermo, passiveRate: passiveRate)
+                    else { continue }
+                    let tT = temperatureTarget(o), tD = dewPointTarget(o)
+                    guard tT.isFinite, tD.isFinite else { continue }
+                    eT.append(rowT); rT.append(tT - passiveRate)
+                    eD.append(rowD); rD.append(tD - passiveRateD)
+                }
+                guard let bT = LeastSquares.fit(x: eT, y: rT, constraints: equipmentTemperatureConstraints),
+                      let bD = LeastSquares.fit(x: eD, y: rD, constraints: equipmentDewPointConstraints)
+                else { break }
+                equipmentT = bT; equipmentD = bD
+                // The cooling coefficient IS the capacity the duty was computed
+                // with; where they disagree, take the fitted one and go again.
+                let cooling = abs(bT[equipmentColumns - 2])
+                let settled = abs(cooling - thermo.capacityCPerHour) < 0.02
+                if cooling > 0.05 { thermo.capacityCPerHour = min(max(cooling, 0.25), 8) }
+                if settled || cooling <= 0.05 { break }
+            }
+        }
 
-        return IndoorModel(plan: plan, encoding: encoding, coil: coil, cooler: cooler,
-                           exposure: exposure,
-                           temperature: betaT, dewPoint: betaD,
-                           score: score, fittedAt: now,
-                           observationCount: xT.count)
+        let candidate = IndoorModel(plan: plan, coil: coil, cooler: cooler, exposure: exposure,
+                                    thermostat: thermo,
+                                    temperature: passiveT + equipmentT, dewPoint: passiveD + equipmentD,
+                                    score: Score(temperatureRMSE: 0, dewPointRMSE: 0, combined: 0, criterion: 0),
+                                    fittedAt: now, observationCount: xT.count + equipmentRows.count)
+        guard let score = candidate.scored(on: test) else { return nil }
+        var fitted = candidate
+        fitted.score = score
+        return fitted
     }
 
-    private static func score(_ xT: [[Double]], _ yT: [Double], _ bT: [Double],
-                              _ xD: [[Double]], _ yD: [Double], _ bD: [Double]) -> Score? {
-        guard let rmseT = rmse(xT, yT, bT), let rmseD = rmse(xD, yD, bD) else { return nil }
-        let usedT = bT.filter { $0 != 0 }.count
-        let usedD = bD.filter { $0 != 0 }.count
-        let criterion = informationCriterion(
-            residualSumOfSquares: rmseT * rmseT * Double(yT.count),
-            observations: yT.count, parameters: usedT)
-            + informationCriterion(
-                residualSumOfSquares: rmseD * rmseD * Double(yD.count),
-                observations: yD.count, parameters: usedD)
+    /// Held-out error of this model, measured on rates it never saw.
+    func scored(on test: [IndoorObservation]) -> Score? {
+        var errorsT: [Double] = [], errorsD: [Double] = [], targetsT: [Double] = [], targetsD: [Double] = []
+        for o in test where o.hvac != .unknown {
+            guard let r = rates(o) else { continue }
+            let aT = Self.temperatureTarget(o), aD = Self.dewPointTarget(o)
+            guard aT.isFinite, aD.isFinite, r.temperature.isFinite, r.dewPoint.isFinite else { continue }
+            errorsT.append(r.temperature - aT); errorsD.append(r.dewPoint - aD)
+            targetsT.append(aT); targetsD.append(aD)
+        }
+        guard errorsT.count > 1 else { return nil }
+        func rootMean(_ e: [Double]) -> Double { (e.reduce(0) { $0 + $1 * $1 } / Double(e.count)).squareRoot() }
+        let rmseT = rootMean(errorsT), rmseD = rootMean(errorsD)
+        let usedT = temperature.filter { $0 != 0 }.count
+        let usedD = dewPoint.filter { $0 != 0 }.count
+        let criterion = Self.informationCriterion(residualSumOfSquares: rmseT * rmseT * Double(errorsT.count),
+                                                  observations: errorsT.count, parameters: usedT)
+            + Self.informationCriterion(residualSumOfSquares: rmseD * rmseD * Double(errorsD.count),
+                                        observations: errorsD.count, parameters: usedD)
         // Normalise by the spread of each target so neither equation dominates
         // just by being measured on a livelier quantity.
-        let combined = (rmseT / max(spread(yT), 0.05) + rmseD / max(spread(yD), 0.05)) / 2
+        let combined = (rmseT / max(Self.spread(targetsT), 0.05) + rmseD / max(Self.spread(targetsD), 0.05)) / 2
         guard combined.isFinite else { return nil }
-        return Score(temperatureRMSE: rmseT, dewPointRMSE: rmseD,
-                     combined: combined, criterion: criterion)
-    }
-
-    private static func rmse(_ x: [[Double]], _ y: [Double], _ beta: [Double]) -> Double? {
-        guard !x.isEmpty, x.count == y.count else { return nil }
-        var total = 0.0
-        for (row, actual) in zip(x, y) {
-            guard row.count == beta.count else { return nil }
-            let predicted = zip(row, beta).reduce(0) { $0 + $1.0 * $1.1 }
-            let e = predicted - actual
-            total += e * e
-        }
-        let value = (total / Double(y.count)).squareRoot()
-        return value.isFinite ? value : nil
+        return Score(temperatureRMSE: rmseT, dewPointRMSE: rmseD, combined: combined, criterion: criterion)
     }
 
     private static func spread(_ y: [Double]) -> Double {
@@ -995,22 +1129,41 @@ nonisolated struct IndoorModel: Sendable, Equatable {
 
     // MARK: Prediction
 
-    /// Indoor temperature and dew point one step of `dt` seconds later.
+    /// Both rates at an observation, °C per hour.
+    func rates(_ o: IndoorObservation) -> (temperature: Double, dewPoint: Double)? {
+        guard let pt = Self.passiveTemperatureRow(o, plan, exposure),
+              let pd = Self.passiveDewPointRow(o, plan),
+              temperature.count == pt.count + Self.equipmentColumns,
+              dewPoint.count == pd.count + Self.equipmentColumns else { return nil }
+        let passiveT = zip(pt, temperature).reduce(0) { $0 + $1.0 * $1.1 }
+        let passiveD = zip(pd, dewPoint).reduce(0) { $0 + $1.0 * $1.1 }
+        guard o.hvac != .off, o.hvac != .unknown else { return (passiveT, passiveD) }
+        guard let et = Self.equipmentTemperatureRow(o, plan, coil, cooler, thermostat, passiveRate: passiveT),
+              let ed = Self.equipmentDewPointRow(o, plan, coil, cooler, thermostat, passiveRate: passiveT)
+        else { return nil }
+        let addT = zip(et, temperature.suffix(Self.equipmentColumns)).reduce(0) { $0 + $1.0 * $1.1 }
+        let addD = zip(ed, dewPoint.suffix(Self.equipmentColumns)).reduce(0) { $0 + $1.0 * $1.1 }
+        return (passiveT + addT, passiveD + addD)
+    }
+
+    /// Indoor temperature, dew point and lag state one step of `dt` later.
     ///
     /// Integrating this repeatedly is how the forecast scenarios are produced:
-    /// override `hvac` to ask "what if the cooler were on".
-    func step(from o: IndoorObservation, dt: Double) -> (temperatureC: Double, dewPointC: Double)? {
-        guard let fT = Self.temperatureFeatures(o, plan, encoding, coil, cooler, exposure),
-              let fD = Self.dewPointFeatures(o, plan, encoding, coil, cooler, exposure),
-              fT.count == temperature.count, fD.count == dewPoint.count else { return nil }
-        let rateT = zip(fT, temperature).reduce(0) { $0 + $1.0 * $1.1 }
-        let rateD = zip(fD, dewPoint).reduce(0) { $0 + $1.0 * $1.1 }
+    /// override `hvac` to ask "what if the cooler were on". The lags come back
+    /// with it because the house's slow parts are state: a forecast that
+    /// dropped them would forget what the walls are holding.
+    func step(from o: IndoorObservation, dt: Double) -> (temperatureC: Double, dewPointC: Double, lags: ThermalLags)? {
+        guard let rate = rates(o) else { return nil }
         let hours = dt / 3600
-        let t = o.indoorTempC + rateT * hours
-        let d = o.indoorDewPointC + rateD * hours
+        let t = o.indoorTempC + rate.temperature * hours
+        let d = o.indoorDewPointC + rate.dewPoint * hours
         guard t.isFinite, d.isFinite else { return nil }
+        let lags = (o.lags ?? ThermalLags.matching(o))
+            .advanced(indoorTempC: o.indoorTempC,
+                      outdoorTempC: o.outdoor(plan).temperatureC,
+                      indoorDewPointC: o.indoorDewPointC, dt: dt)
         // The dew point cannot exceed the dry bulb; clamp rather than let a
         // long integration drift into a physically impossible state.
-        return (t, min(d, t))
+        return (t, min(d, t), lags)
     }
 }

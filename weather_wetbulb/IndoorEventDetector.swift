@@ -190,6 +190,9 @@ enum IndoorEventDetector {
         guard index < obs.count else { return nil }
         var temperature = obs[index].indoorTempC
         var dewPoint = obs[index].indoorDewPointC
+        // The house's slow parts are state: they start where the readings left
+        // them and then follow the simulation, not the real house.
+        var lags = obs[index].lags ?? ThermalLags.matching(obs[index])
         var squared = 0.0
         var steps = 0
 
@@ -201,7 +204,9 @@ enum IndoorEventDetector {
                 nextIndoorTempC: actual.nextIndoorTempC,
                 nextIndoorDewPointC: actual.nextIndoorDewPointC,
                 weatherKit: actual.weatherKit, station: actual.station,
-                solar: actual.solar, hvac: state)
+                solar: actual.solar, solarVertical: actual.solarVertical,
+                solarAzimuthDeg: actual.solarAzimuthDeg, daylight: actual.daylight,
+                setpointC: actual.setpointC, lags: lags, hvac: state)
             guard let next = model.step(from: probe, dt: actual.dt) else { return nil }
 
             let dT = next.temperatureC - actual.nextIndoorTempC
@@ -209,6 +214,7 @@ enum IndoorEventDetector {
             squared += dT * dT + dD * dD
             temperature = next.temperatureC
             dewPoint = next.dewPointC
+            lags = next.lags
             steps += 1
 
             // Stop at a gap: beyond it the simulation is comparing against

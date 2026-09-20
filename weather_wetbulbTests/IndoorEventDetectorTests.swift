@@ -95,7 +95,7 @@ struct IndoorEventDetectorTests {
         let (train, test) = IndoorModelEstimator.split(truthful)
         let model = IndoorModel.fit(train: train, test: test,
                                     plan: OutdoorSourcePlan(all: .station),
-                                    encoding: .harmonic, coil: coil, cooler: cooler)!
+                                    coil: coil, cooler: cooler)!
         return (rows, model)
     }
 

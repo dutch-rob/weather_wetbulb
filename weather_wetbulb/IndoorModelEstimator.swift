@@ -49,9 +49,6 @@ nonisolated enum IndoorModelEstimator {
         var swapsAccepted: [OutdoorVariable]
         /// Passes used before the search settled.
         var passes: Int
-        /// Best held-out score reached under each direction encoding, so the
-        /// debug screen can show what the alternative would have cost.
-        var scoreByEncoding: [WindDirectionEncoding: IndoorModel.Score] = [:]
         /// Criterion reached under each solar-exposure encoding, so the choice
         /// is inspectable and the cost of the richer one is visible.
         var criterionByExposure: [SolarExposureEncoding: Double] = [:]
@@ -99,9 +96,10 @@ nonisolated enum IndoorModelEstimator {
                                through: coolerEffectivenessRange.upperBound, by: 0.01) {
             let cooler = CoolerEffectiveness(fraction: fraction)
             guard let candidate = IndoorModel.fit(train: train, test: test,
-                                                  plan: model.plan, encoding: model.encoding,
+                                                  plan: model.plan,
                                                   coil: model.coil, cooler: cooler,
-                                                  exposure: model.exposure, now: now)
+                                                  exposure: model.exposure,
+                                                  thermostat: model.thermostat, now: now)
             else { continue }
             if candidate.score < best.score { best = candidate }
         }
@@ -134,12 +132,11 @@ nonisolated enum IndoorModelEstimator {
     static let coilSlopeMinimumObservations = 30
     static let coilSlopeMinimumOutdoorSpreadC: Double = 5
 
-    /// Search coil parameters by held-out error, holding sources and encoding
-    /// fixed.
+    /// Search coil parameters by held-out error, holding the sources fixed.
     ///
-    /// The coil affects only rows where the AC was running, while sources and
-    /// encoding are driven by the whole record, so refining it afterwards costs
-    /// far less than nesting it inside the source search and changes little.
+    /// The coil affects only rows where the AC was running, while the sources
+    /// are driven by the whole record, so refining it afterwards costs far less
+    /// than nesting it inside the source search and changes little.
     static func refineCoil(model: IndoorModel,
                            train: [IndoorObservation],
                            test: [IndoorObservation],
@@ -164,9 +161,9 @@ nonisolated enum IndoorModelEstimator {
                 let coil = CoilTemperature(baseC: base, perOutdoorDegree: slope)
                 guard let candidate = IndoorModel.fit(train: train, test: test,
                                                       plan: model.plan,
-                                                      encoding: model.encoding,
                                                       coil: coil, cooler: model.cooler,
-                                                  exposure: model.exposure, now: now)
+                                                      exposure: model.exposure,
+                                                      thermostat: model.thermostat, now: now)
                 else { continue }
                 if candidate.score < best.score { best = candidate }
             }
@@ -184,56 +181,44 @@ nonisolated enum IndoorModelEstimator {
         return (best, note)
     }
 
-    /// Run the source search under every wind-direction encoding and keep the
+    /// Run the source search under each solar-exposure encoding and keep the
     /// best overall.
     ///
     /// Which encoding suits a house cannot be known in advance — it depends on
-    /// how the building sits in its wind — so it is chosen the same way the
-    /// sources are: by held-out error. The harmonic will tend to win while
+    /// which walls and windows the sun reaches — so it is chosen the way the
+    /// sources are: by held-out error. The harmonic pair will tend to win while
     /// history is short, since it spends two coefficients where the tent basis
     /// spends eight; the tent basis should overtake it once there is enough
     /// data to support the extra freedom, and only if the house actually has a
-    /// directional pattern a single sinusoid cannot express.
-    /// Relative gain a more complex encoding must show before it is preferred.
-    /// One percent of the combined score: below that the difference is noise.
-    static let meaningfulImprovement = 0.01
+    /// pattern a single sinusoid cannot express.
 
     static func selectModel(train: [IndoorObservation],
                             test: [IndoorObservation],
                             maxPasses: Int = 7,
                             now: Date = .now) -> Selection? {
         var best: Selection?
-        var scores: [WindDirectionEncoding: IndoorModel.Score] = [:]
-
         var byExposure: [SolarExposureEncoding: Double] = [:]
 
-        // Every combination of the two circular encodings. The information
-        // criterion decides: a richer encoding must pay for its coefficients,
-        // so no ad-hoc margin is needed to stop the search buying complexity
-        // that changes nothing.
-        for encoding in WindDirectionEncoding.allCases {
-            for exposure in SolarExposureEncoding.allCases {
-                guard let candidate = selectSources(train: train, test: test,
-                                                    encoding: encoding, exposure: exposure,
-                                                    maxPasses: maxPasses, now: now)
-                else { continue }
-                let criterion = candidate.model.score.criterion
-                if scores[encoding] == nil || candidate.model.score < scores[encoding]! {
-                    scores[encoding] = candidate.model.score
-                }
-                if byExposure[exposure] == nil || criterion < byExposure[exposure]! {
-                    byExposure[exposure] = criterion
-                }
-                if best == nil || candidate.model.score < best!.model.score {
-                    best = candidate
-                }
+        // How the sun's bearing enters is the one structural choice left to the
+        // search. The information criterion decides: a richer encoding must pay
+        // for its coefficients, so no ad-hoc margin is needed to stop the search
+        // buying complexity that changes nothing.
+        for exposure in SolarExposureEncoding.allCases {
+            guard let candidate = selectSources(train: train, test: test, exposure: exposure,
+                                                maxPasses: maxPasses, now: now)
+            else { continue }
+            let criterion = candidate.model.score.criterion
+            if byExposure[exposure] == nil || criterion < byExposure[exposure]! {
+                byExposure[exposure] = criterion
+            }
+            if best == nil || candidate.model.score < best!.model.score {
+                best = candidate
             }
         }
-        best?.scoreByEncoding = scores
         best?.criterionByExposure = byExposure
         if let winner = best, winner.model.exposure == .harmonic,
            winner.model.temperature.count > 4 {
-            // Exposure columns sit at indices 3 and 4: sin then cos.
+            // Exposure columns follow conduction, daylight and the indoor mass.
             best?.exposureBearing = SolarExposureEncoding.exposureBearing(
                 sinCoefficient: winner.model.temperature[3],
                 cosCoefficient: winner.model.temperature[4])
@@ -250,6 +235,17 @@ nonisolated enum IndoorModelEstimator {
         return best
     }
 
+    /// Which variables the source search may flip, and which move together.
+    ///
+    /// Only variables the model actually uses are worth a swap — rain and wind
+    /// direction no longer enter either equation, and flipping them would cost
+    /// fits and change nothing. Wind and gust move as one because gustiness is
+    /// the difference between them: taken from different sources it measures
+    /// how the two disagree, not how the air gusts.
+    static let swappableGroups: [[OutdoorVariable]] = [
+        [.temperature], [.humidity], [.windSpeed, .windGust], [.pressure],
+    ]
+
     /// Fit both whole-source models, keep the better, then try swapping one
     /// variable at a time for as long as swaps keep helping.
     ///
@@ -259,7 +255,6 @@ nonisolated enum IndoorModelEstimator {
     /// variables a pathological cycle could otherwise run a long time.
     static func selectSources(train: [IndoorObservation],
                               test: [IndoorObservation],
-                              encoding: WindDirectionEncoding = .harmonic,
                               exposure: SolarExposureEncoding = .none,
                               maxPasses: Int = 7,
                               now: Date = .now) -> Selection? {
@@ -268,9 +263,9 @@ nonisolated enum IndoorModelEstimator {
         let wkPlan = OutdoorSourcePlan(all: .weatherKit)
         let stationPlan = OutdoorSourcePlan(all: .station)
         let wkModel = IndoorModel.fit(train: train, test: test, plan: wkPlan,
-                                      encoding: encoding, exposure: exposure, now: now)
+                                      exposure: exposure, now: now)
         let stationModel = IndoorModel.fit(train: train, test: test, plan: stationPlan,
-                                           encoding: encoding, exposure: exposure, now: now)
+                                           exposure: exposure, now: now)
 
         // Start from whichever whole-source fit is better.
         var best: IndoorModel
@@ -286,16 +281,17 @@ nonisolated enum IndoorModelEstimator {
         for pass in 1...max(1, maxPasses) {
             passes = pass
             var changedThisPass = false
-            for v in OutdoorVariable.allCases {
-                let candidatePlan = best.plan.swapping(v)
+            for group in swappableGroups {
+                var candidatePlan = best.plan
+                for v in group { candidatePlan = candidatePlan.swapping(v) }
                 guard let candidate = IndoorModel.fit(
                     train: train, test: test, plan: candidatePlan,
-                    encoding: encoding, exposure: exposure, now: now) else { continue }
+                    exposure: exposure, now: now) else { continue }
                 // Strictly better only: an equal score means the swap bought
                 // nothing, and flipping anyway would let the search oscillate.
                 if candidate.score < best.score {
                     best = candidate
-                    accepted.append(v)
+                    accepted.append(contentsOf: group)
                     changedThisPass = true
                 }
             }

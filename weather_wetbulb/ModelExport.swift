@@ -107,8 +107,12 @@ struct ModelExport: Codable {
     /// What the app fitted from these inputs, so an offline refit can be
     /// checked against it rather than merely admired.
     struct FittedModel: Codable {
-        var encoding: String
         var sources: [String: String]
+        /// Cooling the AC delivers at full duty, °C/h, and the lag constants
+        /// the model carries as state. An offline refit needs both to
+        /// reproduce this fit.
+        var acCapacityCPerHour: Double
+        var lagHours: [String: Double]
         var temperature: [Double]
         var dewPoint: [Double]
         var temperatureLabels: [String]
@@ -120,7 +124,11 @@ struct ModelExport: Codable {
         var fittedAt: Date
 
         init(_ m: IndoorModel) {
-            encoding = m.encoding.rawValue
+            acCapacityCPerHour = m.thermostat.capacityCPerHour
+            lagHours = ["indoorMass": ThermalLags.indoorMassHours,
+                        "envelope": ThermalLags.envelopeHours,
+                        "slowMoisture": ThermalLags.slowMoistureHours,
+                        "fastMoisture": ThermalLags.fastMoistureHours]
             sources = Dictionary(uniqueKeysWithValues:
                 OutdoorVariable.allCases.map { ($0.rawValue, m.plan[$0].rawValue) })
             temperature = m.temperature

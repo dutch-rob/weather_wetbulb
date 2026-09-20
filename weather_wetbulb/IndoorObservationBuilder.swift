@@ -39,6 +39,24 @@ enum IndoorObservationBuilder {
     /// one solar coefficient fits whichever source supplied it.
     static let fullSunKLux: Double = 100
 
+    /// How long the lagged states carry the mark of where they were started.
+    static let lagBurnIn: TimeInterval = 24 * 3600
+
+    /// 1 between sunrise and sunset, 0 at night.
+    ///
+    /// The daytime gain turns out to be squarer than the sun's own arc —
+    /// windows, appliances and people follow the day, not the solar elevation
+    /// — so this is an indicator rather than a height.
+    static func daylight(at date: Date, weatherKit: ForecastPoint?, location: CLLocation?) -> Double {
+        if let location {
+            let sun = SolarGeometry.position(date: date,
+                                             latitude: location.coordinate.latitude,
+                                             longitude: location.coordinate.longitude)
+            return sun.horizontal > 0 ? 1 : 0
+        }
+        return (weatherKit?.isDaylight ?? false) ? 1 : 0
+    }
+
     // MARK: - Building
 
     /// Build observations from stored readings and a WeatherKit series.
@@ -61,6 +79,37 @@ enum IndoorObservationBuilder {
 
         let series = weather.sorted { $0.date < $1.date }
         let timeline = HVACTimeline(coolerEvents: coolerEvents, hvacEvents: hvacEvents)
+
+        // The house's slow parts, walked forward across every reading — not
+        // only the ones that become observations, since a lag that skipped the
+        // gaps would run ahead of the calendar. The envelope is seeded from the
+        // weather before the record starts, which is what it was following.
+        var lags = ThermalLags.starting(indoorTempC: rows[0].indoorTempC ?? 20,
+                                        outdoorTempC: rows[0].outdoorTempC,
+                                        indoorDewPointC: IndoorPsychrometrics.dewPointC(
+                                            temperatureC: rows[0].indoorTempC ?? 20,
+                                            relativeHumidity: rows[0].indoorHumidity ?? 40) ?? 10)
+        let preHistory = series.filter { $0.date < rows[0].date && $0.date > rows[0].date.addingTimeInterval(-4 * 86400) }
+        for (index, point) in preHistory.enumerated() {
+            let until = index + 1 < preHistory.count ? preHistory[index + 1].date : rows[0].date
+            lags = lags.envelopeAdvanced(outdoorTempC: point.temperatureC,
+                                         dt: until.timeIntervalSince(point.date))
+        }
+        var lagByDate: [Date: ThermalLags] = [:]
+        for (a, b) in zip(rows, rows.dropFirst()) {
+            lagByDate[a.date] = lags
+            guard let tA = a.indoorTempC, let hA = a.indoorHumidity,
+                  let dA = IndoorPsychrometrics.dewPointC(temperatureC: tA, relativeHumidity: hA)
+            else { continue }
+            lags = lags.advanced(indoorTempC: tA,
+                                 outdoorTempC: a.outdoorTempC ?? weatherKitValues(at: a.date, in: series).values.temperatureC,
+                                 indoorDewPointC: dA,
+                                 dt: b.date.timeIntervalSince(a.date))
+        }
+        if let last = rows.last { lagByDate[last.date] = lags }
+
+        /// A lag started from one reading needs about a day to forget it.
+        let seasonedFrom = rows[0].date.addingTimeInterval(lagBurnIn)
 
         var out: [IndoorObservation] = []
         for (a, b) in zip(rows, rows.dropFirst()) {
@@ -111,6 +160,10 @@ enum IndoorObservationBuilder {
                                            latitude: $0.coordinate.latitude,
                                            longitude: $0.coordinate.longitude).azimuthDegrees
                 } ?? nil,
+                daylight: daylight(at: a.date, weatherKit: wk.point, location: location),
+                setpointC: timeline.setpoint(at: a.date),
+                lags: lagByDate[a.date],
+                withinLagBurnIn: a.date < seasonedFrom,
                 hvac: state))
         }
         return out
@@ -242,12 +295,12 @@ enum IndoorObservationBuilder {
 /// unlabelled row — would leave nothing to fit until the user has annotated
 /// weeks of history.
 struct HVACTimeline {
-    private let changes: [(date: Date, state: HVACState)]
+    private let changes: [(date: Date, state: HVACState, setpointC: Double?)]
 
     init(coolerEvents: [CoolerEvent], hvacEvents: [HVACEvent]) {
-        var all: [(Date, HVACState)] = []
+        var all: [(Date, HVACState, Double?)] = []
         for e in coolerEvents {
-            all.append((e.date, e.isOn ? .evaporativeCooler : .off))
+            all.append((e.date, e.isOn ? .evaporativeCooler : .off, nil))
         }
         for e in hvacEvents {
             let state: HVACState
@@ -258,9 +311,9 @@ struct HVACTimeline {
             case 3:  state = .vent
             default: state = .off
             }
-            all.append((e.date, state))
+            all.append((e.date, state, e.targetTempC))
         }
-        changes = all.sorted { $0.0 < $1.0 }.map { (date: $0.0, state: $0.1) }
+        changes = all.sorted { $0.0 < $1.0 }.map { (date: $0.0, state: $0.1, setpointC: $0.2) }
     }
 
     /// State implied by the most recent event at or before `date`.
@@ -270,6 +323,11 @@ struct HVACTimeline {
             if change.date <= date { result = change.state } else { break }
         }
         return result
+    }
+
+    /// Thermostat setting in force at `date`, when the event carried one.
+    func setpoint(at date: Date) -> Double? {
+        changes.last(where: { $0.date <= date })?.setpointC
     }
 
     /// Whether any logged change falls strictly inside the interval.

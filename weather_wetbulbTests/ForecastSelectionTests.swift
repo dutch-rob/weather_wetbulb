@@ -128,20 +128,4 @@ struct ForecastSelectionTests {
         #expect(again.coil == model.coil)
         #expect(again.temperature == model.temperature)
     }
-
-    @Test func aFreshSearchIsDueOnlyWhenThereIsSomethingNewToSayOrAWeekHasPassed() {
-        let house = IndoorModelTests.SyntheticHouse()
-        let (train, test) = IndoorModelEstimator.split(house.observations(count: 200))
-        guard let model = IndoorModel.fit(train: train, test: test,
-                                          plan: OutdoorSourcePlan(all: .station))
-        else { #expect(Bool(false)); return }
-        let searched = Date(timeIntervalSince1970: 1_700_000_000)
-        let structure = IndoorModelEstimator.ModelStructure(model: model, observations: 1000, now: searched)
-
-        #expect(IndoorModelEstimator.searchIsDue(nil, observations: 1000, now: searched))
-        #expect(!IndoorModelEstimator.searchIsDue(structure, observations: 1050, now: searched))
-        #expect(IndoorModelEstimator.searchIsDue(structure, observations: 1200, now: searched))
-        #expect(IndoorModelEstimator.searchIsDue(structure, observations: 1050,
-                                                 now: searched.addingTimeInterval(8 * 86400)))
-    }
 }

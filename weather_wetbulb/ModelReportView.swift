@@ -430,11 +430,10 @@ struct ModelReportView: View {
             hasBuilt = true
         }
 
-        // Step two: look for a better structure, but only when the record has
-        // grown enough to have something new to say — a fifth more
-        // observations, or a week gone by. The search refits the model a few
-        // hundred times, so it runs off the main thread with the screen live.
-        guard IndoorModelEstimator.searchIsDue(saved, observations: observations.count) else { return }
+        // Step two: look for a better structure, every time. The search refits
+        // the model a few hundred times — about a second — so it runs off the
+        // main thread with the finished report already on screen, and the
+        // screen says it is still working until the answer comes back.
         isSearching = true
         defer { if generation == fitGeneration { isSearching = false } }
         let selection = await Task.detached(priority: .userInitiated) {

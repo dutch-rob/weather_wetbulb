@@ -40,10 +40,11 @@ nonisolated enum IndoorModelEstimator {
     /// Everything a search settles except the coefficients themselves.
     ///
     /// The coefficients are refitted every time the screen opens, which takes
-    /// milliseconds. Choosing the structure is what costs a second or more, and
-    /// it changes far more slowly than the data does — so it is remembered, and
-    /// searched again only when the record has grown enough to have something
-    /// new to say.
+    /// milliseconds; choosing the structure costs about a second. So the
+    /// structure is remembered and refitted at once, giving the screen a
+    /// complete model to show, while a fresh search runs behind it. Screens
+    /// that are not about the model — the indoor forecast — reuse the
+    /// remembered structure and never search.
     nonisolated struct ModelStructure: Codable, Sendable, Equatable {
         var sources: [String: String]
         var exposure: String
@@ -107,17 +108,6 @@ nonisolated enum IndoorModelEstimator {
         IndoorModel.fit(train: train, test: test, plan: structure.plan,
                         coil: structure.coil, cooler: structure.cooler,
                         exposure: structure.solarExposure, thermostat: structure.thermostat, now: now)
-    }
-
-    /// Growth in observations that earns a fresh search, and how long a
-    /// structure may stand without one.
-    static let searchGrowthFraction = 0.2
-    static let searchInterval: TimeInterval = 7 * 86400
-
-    static func searchIsDue(_ structure: ModelStructure?, observations: Int, now: Date = .now) -> Bool {
-        guard let structure else { return true }
-        if observations >= Int(Double(structure.observationsAtSearch) * (1 + searchGrowthFraction)) { return true }
-        return now.timeIntervalSince(structure.searchedAt) >= searchInterval
     }
 
     // MARK: - Forecast scoring

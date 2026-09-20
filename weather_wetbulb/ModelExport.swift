@@ -113,6 +113,13 @@ struct ModelExport: Codable {
         /// reproduce this fit.
         var acCapacityCPerHour: Double
         var lagHours: [String: Double]
+        /// The rest of the structure the search settled. With these, an offline
+        /// refit reproduces exactly the model the app was showing, rather than
+        /// whatever a fresh search would choose today.
+        var exposure: String
+        var coilBaseC: Double
+        var coilPerOutdoorDegree: Double
+        var coolerFraction: Double
         var temperature: [Double]
         var dewPoint: [Double]
         var temperatureLabels: [String]
@@ -131,6 +138,10 @@ struct ModelExport: Codable {
                         "fastMoisture": ThermalLags.fastMoistureHours]
             sources = Dictionary(uniqueKeysWithValues:
                 OutdoorVariable.allCases.map { ($0.rawValue, m.plan[$0].rawValue) })
+            exposure = m.exposure.rawValue
+            coilBaseC = m.coil.baseC
+            coilPerOutdoorDegree = m.coil.perOutdoorDegree
+            coolerFraction = m.cooler.fraction
             temperature = m.temperature
             dewPoint = m.dewPoint
             temperatureLabels = m.temperatureLabels

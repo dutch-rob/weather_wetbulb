@@ -35,6 +35,170 @@ nonisolated enum IndoorModelEstimator {
         return (Array(sorted[..<cut]), Array(sorted[cut...]))
     }
 
+    // MARK: - The structure, remembered between openings
+
+    /// Everything a search settles except the coefficients themselves.
+    ///
+    /// The coefficients are refitted every time the screen opens, which takes
+    /// milliseconds. Choosing the structure is what costs a second or more, and
+    /// it changes far more slowly than the data does — so it is remembered, and
+    /// searched again only when the record has grown enough to have something
+    /// new to say.
+    nonisolated struct ModelStructure: Codable, Sendable, Equatable {
+        var sources: [String: String]
+        var exposure: String
+        var coilBaseC: Double
+        var coilPerOutdoorDegree: Double
+        var coolerFraction: Double
+        var acCapacityCPerHour: Double
+        var coilNote: String = ""
+        var coolerNote: String = ""
+        var searchedAt: Date
+        var observationsAtSearch: Int
+
+        init(model: IndoorModel, observations: Int, coilNote: String = "", coolerNote: String = "",
+             now: Date = .now) {
+            sources = Dictionary(uniqueKeysWithValues:
+                OutdoorVariable.allCases.map { ($0.rawValue, model.plan[$0].rawValue) })
+            exposure = model.exposure.rawValue
+            coilBaseC = model.coil.baseC
+            coilPerOutdoorDegree = model.coil.perOutdoorDegree
+            coolerFraction = model.cooler.fraction
+            acCapacityCPerHour = model.thermostat.capacityCPerHour
+            self.coilNote = coilNote
+            self.coolerNote = coolerNote
+            searchedAt = now
+            observationsAtSearch = observations
+        }
+
+        var plan: OutdoorSourcePlan {
+            var out = OutdoorSourcePlan(all: .weatherKit)
+            for v in OutdoorVariable.allCases {
+                if let raw = sources[v.rawValue], let source = OutdoorSource(rawValue: raw) {
+                    out[v] = source
+                }
+            }
+            return out
+        }
+        var solarExposure: SolarExposureEncoding { SolarExposureEncoding(rawValue: exposure) ?? .none }
+        var coil: CoilTemperature { CoilTemperature(baseC: coilBaseC, perOutdoorDegree: coilPerOutdoorDegree) }
+        var cooler: CoolerEffectiveness { CoolerEffectiveness(fraction: coolerFraction) }
+        var thermostat: ACThermostat { ACThermostat(capacityCPerHour: acCapacityCPerHour) }
+    }
+
+    static let structureKey = "indoor.modelStructure"
+
+    static func savedStructure(defaults: UserDefaults = .standard) -> ModelStructure? {
+        guard let data = defaults.data(forKey: structureKey) else { return nil }
+        return try? JSONDecoder().decode(ModelStructure.self, from: data)
+    }
+
+    static func save(_ structure: ModelStructure, defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(structure) else { return }
+        defaults.set(data, forKey: structureKey)
+    }
+
+    /// Fit the coefficients of a remembered structure. Milliseconds, and what
+    /// the screen shows while a fresh search runs behind it.
+    static func fit(structure: ModelStructure,
+                    train: [IndoorObservation],
+                    test: [IndoorObservation],
+                    now: Date = .now) -> IndoorModel? {
+        IndoorModel.fit(train: train, test: test, plan: structure.plan,
+                        coil: structure.coil, cooler: structure.cooler,
+                        exposure: structure.solarExposure, thermostat: structure.thermostat, now: now)
+    }
+
+    /// Growth in observations that earns a fresh search, and how long a
+    /// structure may stand without one.
+    static let searchGrowthFraction = 0.2
+    static let searchInterval: TimeInterval = 7 * 86400
+
+    static func searchIsDue(_ structure: ModelStructure?, observations: Int, now: Date = .now) -> Bool {
+        guard let structure else { return true }
+        if observations >= Int(Double(structure.observationsAtSearch) * (1 + searchGrowthFraction)) { return true }
+        return now.timeIntervalSince(structure.searchedAt) >= searchInterval
+    }
+
+    // MARK: - Forecast scoring
+
+    /// Longest a forecast runs before it is restarted, and the shortest stretch
+    /// worth scoring. A day is what the app is asked for; three hours is long
+    /// enough for the slow terms to show.
+    static let forecastWindowHours: Double = 24
+    static let minimumForecastWindowHours: Double = 3
+    /// Contiguous blocks the record is cut into. Each is forecast by a model
+    /// fitted without it, so no window is ever predicted by its own rows.
+    static let scoringBlocks = 4
+
+    /// Runs of consecutive observations, cut into windows of at most a day.
+    ///
+    /// Consecutive means the next observation starts where this one ended: a
+    /// gap in the readings, or a stretch whose equipment nobody recorded, ends
+    /// the window rather than being forecast across.
+    static func forecastWindows(_ rows: [IndoorObservation]) -> [[IndoorObservation]] {
+        var out: [[IndoorObservation]] = [], current: [IndoorObservation] = []
+        func flush() {
+            if let first = current.first, let last = current.last,
+               last.date.addingTimeInterval(last.dt).timeIntervalSince(first.date)
+                   >= minimumForecastWindowHours * 3600 {
+                out.append(current)
+            }
+            current = []
+        }
+        for o in rows.sorted(by: { $0.date < $1.date }) {
+            guard o.hvac != .unknown else { flush(); continue }
+            if let previous = current.last {
+                let expected = previous.date.addingTimeInterval(previous.dt)
+                let broken = abs(o.date.timeIntervalSince(expected)) > 60
+                let full = o.date.timeIntervalSince(current[0].date) >= forecastWindowHours * 3600
+                if broken || full { flush() }
+            }
+            current.append(o)
+        }
+        flush()
+        return out
+    }
+
+    /// How well a structure forecasts, averaged over the whole record.
+    ///
+    /// This is what selection compares, in place of the one-step criterion.
+    /// The two disagree on exactly the terms that matter most: a mass with a
+    /// time constant of days barely moves the next twenty minutes.
+    static func forecastScore(all: [IndoorObservation],
+                              plan: OutdoorSourcePlan,
+                              coil: CoilTemperature = CoilTemperature(),
+                              cooler: CoolerEffectiveness = CoolerEffectiveness(),
+                              exposure: SolarExposureEncoding = .none,
+                              thermostat: ACThermostat = ACThermostat(),
+                              blocks: Int = scoringBlocks,
+                              now: Date = .now) -> IndoorModel.ForecastScore? {
+        let sorted = all.sorted { $0.date < $1.date }
+        guard sorted.count >= 40, blocks > 1 else { return nil }
+        let size = sorted.count / blocks
+        var errorsT: [Double] = [], errorsD: [Double] = [], windows = 0
+        for block in 0..<blocks {
+            let lower = block * size
+            let upper = block == blocks - 1 ? sorted.count : (block + 1) * size
+            let held = Array(sorted[lower..<upper])
+            let train = Array(sorted[..<lower]) + Array(sorted[upper...])
+            guard let model = IndoorModel.fit(train: train, test: held, plan: plan, coil: coil,
+                                              cooler: cooler, exposure: exposure,
+                                              thermostat: thermostat, now: now) else { continue }
+            for window in forecastWindows(held) {
+                guard let errors = model.forecastErrors(over: window) else { continue }
+                errorsT.append(contentsOf: errors.temperature.map(abs))
+                errorsD.append(contentsOf: errors.dewPoint.map(abs))
+                windows += 1
+            }
+        }
+        guard windows > 0, !errorsT.isEmpty else { return nil }
+        return IndoorModel.ForecastScore(
+            temperatureMAE: errorsT.reduce(0, +) / Double(errorsT.count),
+            dewPointMAE: errorsD.reduce(0, +) / Double(errorsD.count),
+            windows: windows)
+    }
+
     // MARK: - Source selection
 
     /// Result of the selection search, kept for the debug screen so the choice
@@ -60,6 +224,11 @@ nonisolated enum IndoorModelEstimator {
         var coilNote: String = ""
         /// The same for the swamp cooler's effectiveness.
         var coolerNote: String = ""
+        /// How well the winning structure forecasts, cross-validated over the
+        /// whole record. This is what the search compared.
+        var forecastScore: IndoorModel.ForecastScore?
+        /// What each solar-exposure encoding reached, for the same reason.
+        var forecastByExposure: [SolarExposureEncoding: Double] = [:]
     }
 
     // MARK: - Cooler effectiveness
@@ -92,8 +261,11 @@ nonisolated enum IndoorModelEstimator {
         // temperature climbs 10 °C while the cooler runs, "the cooler works
         // badly" and "solar gain is under-credited" fit almost equally well.
         var best = model
+        var bestScore = forecastScore(all: train + test, plan: model.plan, coil: model.coil,
+                                      cooler: model.cooler, exposure: model.exposure,
+                                      thermostat: model.thermostat, now: now)
         for fraction in stride(from: coolerEffectivenessRange.lowerBound,
-                               through: coolerEffectivenessRange.upperBound, by: 0.01) {
+                               through: coolerEffectivenessRange.upperBound, by: 0.02) {
             let cooler = CoolerEffectiveness(fraction: fraction)
             guard let candidate = IndoorModel.fit(train: train, test: test,
                                                   plan: model.plan,
@@ -101,7 +273,14 @@ nonisolated enum IndoorModelEstimator {
                                                   exposure: model.exposure,
                                                   thermostat: model.thermostat, now: now)
             else { continue }
-            if candidate.score < best.score { best = candidate }
+            let score = forecastScore(all: train + test, plan: model.plan, coil: model.coil,
+                                      cooler: cooler, exposure: model.exposure,
+                                      thermostat: model.thermostat, now: now)
+            switch (score, bestScore) {
+            case let (new?, current?): if new < current { best = candidate; bestScore = new }
+            case (nil, nil):           if candidate.score < best.score { best = candidate }
+            default:                   break
+            }
         }
         var note: String
         if best.cooler == model.cooler {
@@ -152,11 +331,19 @@ nonisolated enum IndoorModelEstimator {
             && spread >= coilSlopeMinimumOutdoorSpreadC
         // Range chosen wide enough that a result landing on the edge is
         // meaningful rather than an artefact of where the grid stopped.
-        let slopes: [Double] = slopeAllowed
-            ? stride(from: 0.0, through: 0.60, by: 0.05).map { $0 } : [0]
+        // Coarser than it was: every candidate now costs a cross-validated
+        // forecast rather than one fit, and a coil temperature to the nearest
+        // two degrees is as fine as a fortnight of AC hours can justify.
+        // A coil rises about 0.5-1 °F per 5 °F outdoors, so 0.10-0.20 °C per
+        // °C is the physical band; 0.30 is offered as a wider option and 0 as
+        // the null. Anything steeper is the fit chasing something else.
+        let slopes: [Double] = slopeAllowed ? [0, 0.10, 0.15, 0.20, 0.30] : [0]
 
         var best = model
-        for base in stride(from: 2.0, through: 16.0, by: 1.0) {
+        var bestScore = forecastScore(all: train + test, plan: model.plan, coil: model.coil,
+                                      cooler: model.cooler, exposure: model.exposure,
+                                      thermostat: model.thermostat, now: now)
+        for base in stride(from: 2.0, through: 16.0, by: 2.0) {
             for slope in slopes {
                 let coil = CoilTemperature(baseC: base, perOutdoorDegree: slope)
                 guard let candidate = IndoorModel.fit(train: train, test: test,
@@ -165,15 +352,28 @@ nonisolated enum IndoorModelEstimator {
                                                       exposure: model.exposure,
                                                       thermostat: model.thermostat, now: now)
                 else { continue }
-                if candidate.score < best.score { best = candidate }
+                let score = forecastScore(all: train + test, plan: model.plan, coil: coil,
+                                          cooler: model.cooler, exposure: model.exposure,
+                                          thermostat: model.thermostat, now: now)
+                switch (score, bestScore) {
+                case let (new?, current?): if new < current { best = candidate; bestScore = new }
+                case (nil, nil):           if candidate.score < best.score { best = candidate }
+                default:                   break
+                }
             }
         }
-        let note: String
+        var note: String
         if best.coil == model.coil {
             note = "assumed \(Int(model.coil.baseC)) °C — no setting scored better"
         } else if slopeAllowed {
             note = String(format: "estimated %.0f °C at 25 °C outdoor, %+.2f °C per outdoor degree",
                           best.coil.baseC, best.coil.perOutdoorDegree)
+            // A coil rises 0.10–0.20 °C per outdoor degree. Landing above that
+            // means the term is carrying something else — a hot-afternoon
+            // effect the passive half is missing, most likely.
+            if best.coil.perOutdoorDegree > 0.25 {
+                note += " — steeper than a coil should be, so treat it with suspicion"
+            }
         } else {
             note = String(format: "estimated %.0f °C; outdoor range only %.1f °C, too narrow to tell whether it varies",
                           best.coil.baseC, spread)
@@ -198,24 +398,35 @@ nonisolated enum IndoorModelEstimator {
                             now: Date = .now) -> Selection? {
         var best: Selection?
         var byExposure: [SolarExposureEncoding: Double] = [:]
+        var forecastByExposure: [SolarExposureEncoding: Double] = [:]
+        let all = train + test
 
         // How the sun's bearing enters is the one structural choice left to the
-        // search. The information criterion decides: a richer encoding must pay
-        // for its coefficients, so no ad-hoc margin is needed to stop the search
-        // buying complexity that changes nothing.
+        // search, and it is decided by forecasting: each encoding is scored by
+        // cross-validated day-ahead error, not by how well it predicts the next
+        // twenty minutes. The richer encoding has to forecast better, not
+        // merely fit better, which is a far harder thing to buy by chance.
         for exposure in SolarExposureEncoding.allCases {
             guard let candidate = selectSources(train: train, test: test, exposure: exposure,
                                                 maxPasses: maxPasses, now: now)
             else { continue }
-            let criterion = candidate.model.score.criterion
-            if byExposure[exposure] == nil || criterion < byExposure[exposure]! {
-                byExposure[exposure] = criterion
-            }
-            if best == nil || candidate.model.score < best!.model.score {
-                best = candidate
+            byExposure[exposure] = candidate.model.score.criterion
+            guard let forecast = candidate.forecastScore else { continue }
+            forecastByExposure[exposure] = forecast.combined
+            if best == nil || forecast < best!.forecastScore! { best = candidate }
+        }
+        // Nothing could be forecast — too little history, or every window
+        // broken by gaps. Fall back on the one-step criterion rather than
+        // refusing to produce a model at all.
+        if best == nil {
+            for exposure in SolarExposureEncoding.allCases {
+                guard let candidate = selectSources(train: train, test: test, exposure: exposure,
+                                                    maxPasses: maxPasses, now: now) else { continue }
+                if best == nil || candidate.model.score < best!.model.score { best = candidate }
             }
         }
         best?.criterionByExposure = byExposure
+        best?.forecastByExposure = forecastByExposure
         if let winner = best, winner.model.exposure == .harmonic,
            winner.model.temperature.count > 4 {
             // Exposure columns follow conduction, daylight and the indoor mass.
@@ -230,6 +441,13 @@ nonisolated enum IndoorModelEstimator {
             let cooler = refineCooler(model: winner.model, train: train, test: test, now: now)
             winner.model = cooler.model
             winner.coolerNote = cooler.note
+            // The refinements moved the model, so the headline forecast score
+            // has to be the one the final model actually reaches.
+            winner.forecastScore = forecastScore(all: all, plan: winner.model.plan,
+                                                 coil: winner.model.coil, cooler: winner.model.cooler,
+                                                 exposure: winner.model.exposure,
+                                                 thermostat: winner.model.thermostat, now: now)
+                ?? winner.forecastScore
             best = winner
         }
         return best
@@ -262,19 +480,33 @@ nonisolated enum IndoorModelEstimator {
 
         let wkPlan = OutdoorSourcePlan(all: .weatherKit)
         let stationPlan = OutdoorSourcePlan(all: .station)
+        let all = train + test
+        /// A plan is judged by how well it forecasts, falling back to the
+        /// one-step criterion only where no window can be forecast at all.
+        func rank(_ model: IndoorModel) -> (forecast: IndoorModel.ForecastScore?, model: IndoorModel) {
+            (forecastScore(all: all, plan: model.plan, coil: model.coil, cooler: model.cooler,
+                           exposure: model.exposure, thermostat: model.thermostat, now: now), model)
+        }
+        func better(_ a: (forecast: IndoorModel.ForecastScore?, model: IndoorModel),
+                    _ b: (forecast: IndoorModel.ForecastScore?, model: IndoorModel)) -> Bool {
+            if let x = a.forecast, let y = b.forecast { return x < y }
+            return a.model.score < b.model.score
+        }
+
         let wkModel = IndoorModel.fit(train: train, test: test, plan: wkPlan,
                                       exposure: exposure, now: now)
         let stationModel = IndoorModel.fit(train: train, test: test, plan: stationPlan,
                                            exposure: exposure, now: now)
 
-        // Start from whichever whole-source fit is better.
-        var best: IndoorModel
+        // Start from whichever whole-source fit forecasts better.
+        var current: (forecast: IndoorModel.ForecastScore?, model: IndoorModel)
         switch (wkModel, stationModel) {
-        case let (w?, s?): best = w.score <= s.score ? w : s
-        case let (w?, nil): best = w
-        case let (nil, s?): best = s
+        case let (w?, s?): current = better(rank(w), rank(s)) ? rank(w) : rank(s)
+        case let (w?, nil): current = rank(w)
+        case let (nil, s?): current = rank(s)
         case (nil, nil):    return nil
         }
+        var best = current.model
 
         var accepted: [OutdoorVariable] = []
         var passes = 0
@@ -284,13 +516,15 @@ nonisolated enum IndoorModelEstimator {
             for group in swappableGroups {
                 var candidatePlan = best.plan
                 for v in group { candidatePlan = candidatePlan.swapping(v) }
-                guard let candidate = IndoorModel.fit(
+                guard let fitted = IndoorModel.fit(
                     train: train, test: test, plan: candidatePlan,
                     exposure: exposure, now: now) else { continue }
+                let candidate = rank(fitted)
                 // Strictly better only: an equal score means the swap bought
                 // nothing, and flipping anyway would let the search oscillate.
-                if candidate.score < best.score {
-                    best = candidate
+                if better(candidate, current), candidate.forecast != current.forecast {
+                    current = candidate
+                    best = fitted
                     accepted.append(contentsOf: group)
                     changedThisPass = true
                 }
@@ -302,7 +536,8 @@ nonisolated enum IndoorModelEstimator {
                          weatherKitOnly: wkModel?.score,
                          stationOnly: stationModel?.score,
                          swapsAccepted: accepted,
-                         passes: passes)
+                         passes: passes,
+                         forecastScore: current.forecast)
     }
 
     // MARK: - When to refit

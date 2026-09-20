@@ -317,8 +317,8 @@ nonisolated struct IndoorObservation: Sendable {
     /// Seconds to the next reading. Rates are per hour, so this is divided out.
     let dt: Double
 
-    let indoorTempC: Double
-    let indoorDewPointC: Double
+    var indoorTempC: Double
+    var indoorDewPointC: Double
     let nextIndoorTempC: Double
     let nextIndoorDewPointC: Double
 
@@ -797,6 +797,49 @@ nonisolated struct IndoorModel: Sendable, Equatable {
         static func < (a: Score, b: Score) -> Bool { a.criterion < b.criterion }
     }
 
+    /// How well a model FORECASTS, which is what the app actually asks of it.
+    ///
+    /// The one-step score above measures the next twenty minutes. A forecast
+    /// runs for hours, feeding its own output back in, and the two disagree:
+    /// a slow thermal mass barely shows up over twenty minutes and dominates
+    /// over a day, while a term that helps each step a little can drift badly
+    /// once its errors accumulate. Selection therefore compares this.
+    struct ForecastScore: Sendable, Equatable, Comparable {
+        /// Mean absolute error over every forecast hour, °C.
+        var temperatureMAE: Double
+        var dewPointMAE: Double
+        /// Windows the average is over; few windows means a noisy comparison.
+        var windows: Int
+        /// The two added: both are °C, and neither should be traded away.
+        var combined: Double { temperatureMAE + dewPointMAE }
+
+        static func < (a: ForecastScore, b: ForecastScore) -> Bool { a.combined < b.combined }
+    }
+
+    /// Run this model across consecutive observations, feeding its own output
+    /// back in, and report the errors against what the house actually did.
+    ///
+    /// The lags come from the first observation and then follow the forecast,
+    /// not the house: a forecast has no later readings to re-seed them from.
+    func forecastErrors(over window: [IndoorObservation]) -> (temperature: [Double], dewPoint: [Double])? {
+        guard let first = window.first else { return nil }
+        var t = first.indoorTempC, d = first.indoorDewPointC
+        var lags = first.lags ?? ThermalLags.matching(first)
+        var errorsT: [Double] = [], errorsD: [Double] = []
+        for o in window {
+            var probe = o
+            probe.indoorTempC = t
+            probe.indoorDewPointC = d
+            probe.lags = lags
+            guard let next = step(from: probe, dt: o.dt) else { return nil }
+            t = next.temperatureC; d = next.dewPointC; lags = next.lags
+            guard t.isFinite, d.isFinite else { return nil }
+            errorsT.append(t - o.nextIndoorTempC)
+            errorsD.append(d - o.nextIndoorDewPointC)
+        }
+        return errorsT.isEmpty ? nil : (errorsT, errorsD)
+    }
+
     /// AICc on validation residuals.
     ///
     /// Not textbook AIC, which is computed in-sample: here the residuals come
@@ -836,6 +879,10 @@ nonisolated struct IndoorModel: Sendable, Equatable {
 
     /// Columns the equipment half contributes to either equation.
     static let equipmentColumns = 5
+
+    /// Nothing-running rows needed before the passive half is fitted on them
+    /// alone rather than on everything.
+    static let minimumPassiveRows = 20
 
     /// dT_in/dt passive row. Order must match the head of `temperature`.
     static func passiveTemperatureRow(_ o: IndoorObservation,
@@ -1037,7 +1084,15 @@ nonisolated struct IndoorModel: Sendable, Equatable {
         let known = train.filter { $0.hvac != .unknown }
         let seasoned = known.filter { !$0.withinLagBurnIn }
         let usable = seasoned.filter { $0.hvac == .off }.count >= 30 ? seasoned : known
-        let passiveRows = usable.filter { $0.hvac == .off }
+        // Normally the passive half is fitted on the stretches with nothing
+        // running. A house whose equipment ran during every reading has no such
+        // stretch, and refusing to produce a model at all would be worse than
+        // the alternative: fit the passive half on everything, and let the
+        // equipment terms explain what is left. The passive coefficients then
+        // carry some of the equipment's work, which is what staging avoids —
+        // so this is a fallback, not a mode.
+        let offRows = usable.filter { $0.hvac == .off }
+        let passiveRows = offRows.count >= minimumPassiveRows ? offRows : usable
         var xT: [[Double]] = [], yT: [Double] = [], xD: [[Double]] = [], yD: [Double] = []
         for o in passiveRows {
             guard let rt = passiveTemperatureRow(o, plan, exposure),

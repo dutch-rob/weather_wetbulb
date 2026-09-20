@@ -55,6 +55,8 @@ struct ModelReportView: View {
     @State private var fitGeneration = 0
     /// A refit is running behind a report already on screen.
     @State private var isFitting = false
+    /// A search for a better structure is running behind a complete fit.
+    @State private var isSearching = false
 
     var body: some View {
         NavigationStack {
@@ -213,10 +215,11 @@ struct ModelReportView: View {
 
     private func fitSection(_ r: Report) -> some View {
         Section {
-            if isFitting {
+            if isFitting || isSearching {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Refitting…").font(.caption).foregroundStyle(.secondary)
+                    Text(isSearching ? "Looking for a better structure…" : "Refitting…")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             row("Observations", "\(r.model.observationCount) fitted, \(r.observations.count) built")
@@ -229,6 +232,13 @@ struct ModelReportView: View {
             row("Slow parts, τ", String(format: "mass %.0f h, envelope %.0f h, moisture %.0f h",
                                         ThermalLags.indoorMassHours, ThermalLags.envelopeHours,
                                         ThermalLags.slowMoistureHours))
+            if let forecast = r.forecastScore {
+                row("Day-ahead error", String(format: "%.2f °C temp, %.2f °C dew pt",
+                                              forecast.temperatureMAE, forecast.dewPointMAE))
+            }
+            if let searched = r.structureSearchedAt {
+                row("Structure chosen", Self.stamp(searched))
+            }
             row("Held-out error, temp", String(format: "%.3f °C/h", r.model.score.temperatureRMSE))
             row("Held-out error, dew pt", String(format: "%.3f °C/h", r.model.score.dewPointRMSE))
             row("Combined", String(format: "%.3f", r.model.score.combined))
@@ -405,28 +415,58 @@ struct ModelReportView: View {
             coolerEvents: coolerEvents, hvacEvents: hvacEvents,
             location: home.clLocation)
         let (train, test) = IndoorModelEstimator.split(observations)
-        // Off the main thread. The search refits the model a few hundred
-        // times — about a second in an optimised build, closer to half a
-        // minute in a Debug one — and while it ran on the main thread nothing
-        // else could happen, scrolling included.
+
+        // Step one: refit the structure last chosen. That is two small least
+        // squares and takes milliseconds, so the screen fills immediately with
+        // a complete fit of today's data rather than with a spinner.
+        let saved = IndoorModelEstimator.savedStructure()
+        if let saved, let quick = IndoorModelEstimator.fit(structure: saved, train: train, test: test) {
+            report = Report(model: quick, observations: observations,
+                            coilNote: saved.coilNote, coolerNote: saved.coolerNote,
+                            exposureBearing: Self.bearing(of: quick),
+                            structureSearchedAt: saved.searchedAt)
+            exportFile = writeExport(readings)
+            isFitting = false
+            hasBuilt = true
+        }
+
+        // Step two: look for a better structure, but only when the record has
+        // grown enough to have something new to say — a fifth more
+        // observations, or a week gone by. The search refits the model a few
+        // hundred times, so it runs off the main thread with the screen live.
+        guard IndoorModelEstimator.searchIsDue(saved, observations: observations.count) else { return }
+        isSearching = true
+        defer { if generation == fitGeneration { isSearching = false } }
         let selection = await Task.detached(priority: .userInitiated) {
             IndoorModelEstimator.selectModel(train: train, test: test)
         }.value
         guard generation == fitGeneration else { return }
         guard let selection else {
-            report = nil
-            exportFile = writeExport(readings)
+            if report == nil { exportFile = writeExport(readings) }
             return
         }
+        let structure = IndoorModelEstimator.ModelStructure(
+            model: selection.model, observations: observations.count,
+            coilNote: selection.coilNote, coolerNote: selection.coolerNote)
+        IndoorModelEstimator.save(structure)
         report = Report(model: selection.model, observations: observations,
                         coilNote: selection.coilNote,
                         coolerNote: selection.coolerNote,
-                        exposureBearing: selection.exposureBearing)
+                        exposureBearing: selection.exposureBearing,
+                        forecastScore: selection.forecastScore,
+                        structureSearchedAt: structure.searchedAt)
         // Rewrite the bundle here, not on appear. Writing it once when the
         // screen opened meant that adding an event refreshed the report but
         // left Export sharing the snapshot taken beforehand — silently missing
         // the very event just recorded.
         exportFile = writeExport(readings)
+    }
+
+    /// The bearing a harmonic exposure implies, for the row that shows it.
+    static func bearing(of model: IndoorModel) -> Double? {
+        guard model.exposure == .harmonic, model.temperature.count > 4 else { return nil }
+        return SolarExposureEncoding.exposureBearing(sinCoefficient: model.temperature[3],
+                                                     cosCoefficient: model.temperature[4])
     }
 
     // MARK: - Report
@@ -440,6 +480,10 @@ struct ModelReportView: View {
         var coolerNote: String = ""
         /// Bearing the house appears most exposed to, when one was fitted.
         var exposureBearing: Double?
+        /// Day-ahead error of this structure, from the search that chose it.
+        var forecastScore: IndoorModel.ForecastScore?
+        /// When the structure was last searched for, as opposed to refitted.
+        var structureSearchedAt: Date?
 
         /// Hours for the passive response to close most of an indoor-outdoor
         /// gap. Only meaningful when conduction came out positive.

@@ -44,6 +44,8 @@ struct ContentView: View {
     /// Model report sheet, reachable from the graph screen's left button.
     @State private var showModelReport = false
     @State private var showEvents = false
+    /// The indoor forecast, reached by a vertical swipe from the zoom graph.
+    @State private var foldShowsIndoor = false
     /// Which graph to come back to from the table.
     @State private var lastGraph: ForecastScreen = .today
 
@@ -109,6 +111,8 @@ struct ContentView: View {
             if useFoldTimeline {
                 if showTable && foldShowsTable {
                     forecastTableTab
+                } else if foldShowsIndoor {
+                    indoorForecastTab
                 } else {
                     foldTab
                 }
@@ -345,6 +349,20 @@ struct ContentView: View {
 
     /// Title with buttons to the screens the user is not on. Gestures alone are
     /// impractical for reaching a screen now that the graphs scroll ten days.
+    /// The indoor forecast, with the same vertical swipe to get back.
+    private var indoorForecastTab: some View {
+        IndoorForecastView(series: weather.seriesFull,
+                           location: selectedPlace?.clLocation ?? locationProvider.currentLocation,
+                           places: places,
+                           nowTick: nowTick,
+                           onShowGraph: { withAnimation(.easeInOut(duration: 0.25)) { foldShowsIndoor = false } })
+            .gesture(DragGesture(minimumDistance: 24).onEnded { value in
+                guard abs(value.translation.height) > 40,
+                      abs(value.translation.height) > abs(value.translation.width) else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { foldShowsIndoor = false }
+            })
+    }
+
     private func headerBar(_ title: String,
                            left: (String, () -> Void)? = nil,
                            nextToLeft: (String, () -> Void)? = nil,
@@ -516,7 +534,8 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
+                onVerticalSwipe: { withAnimation(.easeInOut(duration: 0.25)) { foldShowsIndoor = true } }
             )
         }
         .sheet(isPresented: $showModelReport) {

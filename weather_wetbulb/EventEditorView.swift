@@ -98,7 +98,8 @@ struct EventEditorView: View {
     @State private var hour: Int = Calendar.current.component(.hour, from: Date())
     @State private var minute: Int = Calendar.current.component(.minute, from: Date()) / 5 * 5
     @State private var hasSetpoint = false
-    @State private var setpoint: Double = 22
+    /// Filled in on appear, in whichever unit is on screen: 24 °C or 75 °F.
+    @State private var setpoint: Double = 24
     @State private var saveError: String?
     @State private var loaded = false
 
@@ -282,6 +283,7 @@ struct EventEditorView: View {
 
     /// Fill the wheels from the event being edited, once.
     private func loadExisting() {
+        setpoint = IndoorForecastView.defaultSetpointDisplayed(fahrenheit: useFahrenheit)
         guard !loaded, let editing else { loaded = true; return }
         loaded = true
         let cal = Calendar.current
@@ -289,6 +291,8 @@ struct EventEditorView: View {
         day = cal.startOfDay(for: editing.date)
         hour = cal.component(.hour, from: editing.date)
         minute = cal.component(.minute, from: editing.date)
+        // An event recorded with a setting keeps it; one recorded without gets
+        // the same default a new event would, rather than an arbitrary number.
         if let celsius = editing.setpointC {
             hasSetpoint = true
             setpoint = useFahrenheit ? (celsius * 9 / 5 + 32).rounded()

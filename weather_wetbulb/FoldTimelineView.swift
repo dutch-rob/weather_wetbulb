@@ -25,9 +25,9 @@ struct FoldTimelineView: View {
     var errorMessage: String? = nil
     var attribution: WeatherAttributionInfo? = nil
     var onRefresh: (() async -> Void)? = nil
-    /// Vertical swipe asks for the table screen (only wired up when the table
-    /// is enabled in Settings). Pinch now owns zooming, which frees this up.
-    var onShowTable: (() -> Void)? = nil
+    /// Vertical swipe leaves the graph for the indoor forecast. Pinch owns
+    /// zooming, which is what freed the vertical axis for this.
+    var onVerticalSwipe: (() -> Void)? = nil
 
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit = true
     @AppStorage(SettingsKey.use12HourClock) private var use12Hour = false
@@ -204,7 +204,8 @@ struct FoldTimelineView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Horizontal drag pans through time; a vertical drag asks for the table.
+    /// Horizontal drag pans through time; a vertical drag leaves for the
+    /// indoor forecast.
     /// Zooming is a pinch (below), which is the gesture people expect.
     private func foldDrag(size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 14)
@@ -222,7 +223,7 @@ struct FoldTimelineView: View {
             .onEnded { v in
                 defer { dragAxis = nil; panBase = nil }
                 if dragAxis == .vertical, abs(v.translation.height) > 40 {
-                    onShowTable?()
+                    onVerticalSwipe?()
                 }
             }
     }

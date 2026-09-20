@@ -27,7 +27,7 @@ struct ModelExport: Codable {
     // MARK: - Inputs
 
     /// One stored station reading, as the model saw it.
-    struct Reading: Codable {
+    nonisolated struct Reading: Codable {
         var date: Date
         var sourceID: String
         var indoorTempC: Double?
@@ -62,7 +62,7 @@ struct ModelExport: Codable {
     /// The WeatherKit fields the aligner actually reads. Not the whole
     /// ForecastPoint: only what affects the fit, so the file stays small enough
     /// to share.
-    struct Weather: Codable {
+    nonisolated struct Weather: Codable {
         var date: Date
         var temperatureC: Double
         /// 0…1, as WeatherKit reports it. The aligner scales to percent.
@@ -106,7 +106,7 @@ struct ModelExport: Codable {
 
     /// What the app fitted from these inputs, so an offline refit can be
     /// checked against it rather than merely admired.
-    struct FittedModel: Codable {
+    nonisolated struct FittedModel: Codable {
         var sources: [String: String]
         /// Cooling the AC delivers at full duty, °C/h, and the lag constants
         /// the model carries as state. An offline refit needs both to

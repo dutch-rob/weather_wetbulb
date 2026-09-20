@@ -47,7 +47,7 @@ enum IndoorObservationBuilder {
     /// The daytime gain turns out to be squarer than the sun's own arc —
     /// windows, appliances and people follow the day, not the solar elevation
     /// — so this is an indicator rather than a height.
-    static func daylight(at date: Date, weatherKit: ForecastPoint?, location: CLLocation?) -> Double {
+    nonisolated static func daylight(at date: Date, weatherKit: ForecastPoint?, location: CLLocation?) -> Double {
         if let location {
             let sun = SolarGeometry.position(date: date,
                                              latitude: location.coordinate.latitude,

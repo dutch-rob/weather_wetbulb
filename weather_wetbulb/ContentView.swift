@@ -45,7 +45,10 @@ struct ContentView: View {
     @State private var showModelReport = false
     @State private var showEvents = false
     /// The indoor forecast, reached by a vertical swipe from the zoom graph.
-    @State private var foldShowsIndoor = false
+    /// The indoor forecast, reached by a vertical swipe from the zoom graph.
+    /// The UI tests open it directly, having no way to swipe their way in
+    /// before the first frame.
+    @State private var foldShowsIndoor = ProcessInfo.processInfo.environment["FORECAST_PREVIEW"] != nil
     /// Which graph to come back to from the table.
     @State private var lastGraph: ForecastScreen = .today
 
@@ -59,6 +62,9 @@ struct ContentView: View {
     private let indoorTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     private var displayTitle: String {
+        // The indoor forecast is always about the monitored home, whichever
+        // place the graphs happen to be showing, so the title has to say so.
+        if foldShowsIndoor, let home = places.monitoredHome?.name { return home }
         if let name = selectedPlace?.name { return name }
         return weather.placeDescription.isEmpty ? "Loading…" : weather.placeDescription
     }
@@ -247,7 +253,9 @@ struct ContentView: View {
             #if DEBUG
             if !buildStamp.isEmpty && lastSeenBuild != buildStamp { show = true }
             #endif
-            if show { showWhatsNew = true }
+            // The UI tests drive the indoor forecast, which this sheet would
+            // sit in front of; FORECAST_PREVIEW is their switch.
+            if show, ProcessInfo.processInfo.environment["FORECAST_PREVIEW"] == nil { showWhatsNew = true }
             PhoneWatchSync.shared.start()
             pushToWatch()
             if indoorTracking {
@@ -356,9 +364,12 @@ struct ContentView: View {
                            places: places,
                            nowTick: nowTick,
                            onShowGraph: { withAnimation(.easeInOut(duration: 0.25)) { foldShowsIndoor = false } })
-            .gesture(DragGesture(minimumDistance: 24).onEnded { value in
-                guard abs(value.translation.height) > 40,
-                      abs(value.translation.height) > abs(value.translation.width) else { return }
+            // Swiping back out again. It has to yield to the sliders, which
+            // carry a high-priority gesture of their own, or a drag meant for a
+            // pointer would leave the screen instead of moving the event.
+            .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
+                guard abs(value.translation.height) > 60,
+                      abs(value.translation.height) > abs(value.translation.width) * 1.5 else { return }
                 withAnimation(.easeInOut(duration: 0.25)) { foldShowsIndoor = false }
             })
     }

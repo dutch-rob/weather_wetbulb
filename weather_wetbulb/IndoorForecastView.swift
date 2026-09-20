@@ -71,7 +71,11 @@ struct IndoorForecastView: View {
     }
 
     /// The forecast the house is run against.
-    private var weather: [ForecastPoint] { needsOwnWeather ? homeWeather.seriesFull : series }
+    @State private var previewWeather: [ForecastPoint] = []
+    private var weather: [ForecastPoint] {
+        if !previewWeather.isEmpty { return previewWeather }
+        return needsOwnWeather ? homeWeather.seriesFull : series
+    }
     private var horizonEnd: Date { (start?.date ?? nowTick).addingTimeInterval(IndoorForecast.horizon) }
 
     var body: some View {
@@ -137,25 +141,42 @@ struct IndoorForecastView: View {
              points: IndoorForecast.run(model: model, from: start, scenario: scenario,
                                         weather: weather, location: home?.clLocation) ?? [])
         }
-        GeometryReader { geo in
-            VStack(spacing: 8) {
-                legend
-                chart(runs)
-                    .frame(height: max(160, geo.size.height * 0.46))
-                VStack(spacing: 10) {
-                    ForEach(scenarios.filter { $0.id > 0 }) { scenario in
-                        scenarioSlider(scenario)
-                    }
+        VStack(spacing: 8) {
+            legend
+            chart(runs)
+                .frame(maxHeight: .infinity)          // the graph takes the room
+            VStack(spacing: 10) {
+                ForEach(scenarios.filter { $0.id > 0 }) { scenario in
+                    scenarioSlider(scenario)
                 }
-                .padding(.horizontal, 12)
-                Text("Outdoor conditions come from WeatherKit's forecast: the station cannot report the future.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                Spacer(minLength: 0)
             }
-            .padding(.top, 6)
+            .padding(.horizontal, 12)
+            Text("Outdoor conditions come from WeatherKit's forecast: the station cannot report the future.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 4)
         }
+        .padding(.top, 6)
+    }
+
+    /// The range the lines actually occupy, rounded outward to whole degrees
+    /// with a little air. Left to itself the chart spans zero to a hundred and
+    /// the whole forecast collapses into a band.
+    private func domain(_ runs: [(scenario: IndoorForecast.Scenario, points: [IndoorForecast.Point])]) -> ClosedRange<Double> {
+        var values: [Double] = []
+        for run in runs {
+            for point in run.points {
+                if graphTemp { values.append(point.temperature(fahrenheit: useFahrenheit)) }
+                if graphWetBulb { values.append(point.wetBulb(fahrenheit: useFahrenheit)) }
+                if graphDewPoint { values.append(point.dewPoint(fahrenheit: useFahrenheit)) }
+            }
+        }
+        guard let low = values.min(), let high = values.max() else {
+            return useFahrenheit ? 60...90 : 15...32
+        }
+        let pad = max((high - low) * 0.12, useFahrenheit ? 2 : 1)
+        return (low - pad).rounded(.down)...(high + pad).rounded(.up)
     }
 
     private func chart(_ runs: [(scenario: IndoorForecast.Scenario, points: [IndoorForecast.Point])]) -> some View {
@@ -196,6 +217,7 @@ struct IndoorForecastView: View {
             }
         }
         .chartLegend(.hidden)
+        .chartYScale(domain: domain(runs))
         .chartXScale(domain: (start?.date ?? nowTick)...horizonEnd)
         .chartXAxis {
             AxisMarks(values: .stride(by: .hour, count: 2)) { value in
@@ -293,13 +315,15 @@ struct IndoorForecastView: View {
                 DashKey(style: Self.stroke(for: scenario.id))
                 Text(summary(scenario)).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.8)
+                    .accessibilityIdentifier("scenario\(scenario.id).summary")
             }
             EventSlider(
                 start: start?.date ?? nowTick,
                 horizon: IndoorForecast.horizon,
                 first: binding(for: scenario.id, second: false),
                 second: binding(for: scenario.id, second: true),
-                onTap: { second in editing = PointerTarget(scenario: scenario.id, second: second) })
+                onTap: { second in editing = PointerTarget(scenario: scenario.id, second: second) },
+                identifier: "scenario\(scenario.id)")
                 .frame(height: 34)
         }
     }
@@ -421,7 +445,7 @@ struct IndoorForecastView: View {
     private func name(_ state: HVACState) -> String {
         switch state {
         case .off:               return "nothing running"
-        case .evaporativeCooler: return "cooler"
+        case .evaporativeCooler: return "swamp"
         case .vent:              return "vent"
         case .airConditioning:   return "AC"
         case .heating:           return "heating"
@@ -460,6 +484,42 @@ struct IndoorForecastView: View {
     // MARK: - Preparing
 
     private func prepare() async {
+        // A fixture for the UI tests, which have no station readings and no
+        // iCloud account to get them from. Debug builds only.
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["FORECAST_PREVIEW"] != nil {
+            let now = Date()
+            model = IndoorModel(plan: OutdoorSourcePlan(all: .weatherKit),
+                                coil: CoilTemperature(baseC: 8, perOutdoorDegree: 0.15),
+                                cooler: CoolerEffectiveness(fraction: 0.83), exposure: .none,
+                                thermostat: ACThermostat(capacityCPerHour: 1),
+                                temperature: [0.05, 0.2, 0, 0, 0, 0.6, 0.2, -1.0, 0],
+                                dewPoint: [0.05, 0, 0, 0, 0, 0, 0, 1.0, 0.2, 0, 0],
+                                score: IndoorModel.Score(temperatureRMSE: 0, dewPointRMSE: 0, combined: 0, criterion: 0),
+                                fittedAt: now, observationCount: 500)
+            start = IndoorForecast.Start(date: now, temperatureC: 27.5, dewPointC: 9,
+                                         lags: ThermalLags(indoorMassC: 28, envelopeC: 26,
+                                                           slowDewPointC: 9.5, fastDewPointC: 9),
+                                         pressureHPa: 890)
+            blocker = nil
+            previewWeather = (0...13).map { hour -> ForecastPoint in
+                let date = now.addingTimeInterval(Double(hour) * 3600 - 1800)
+                let temp = 24 + 10 * sin(Double(hour) / 13 * .pi)
+                return ForecastPoint(kind: .forecast, date: date, symbolName: "sun.max", isDaylight: hour < 9,
+                                     uvIndex: 5, temperatureF: temp * 9 / 5 + 32, temperatureC: temp,
+                                     apparentTemperatureF: temp * 9 / 5 + 32, apparentTemperatureC: temp,
+                                     wetBulbF: 0, wetBulbC: 0, dewPointF: 50, dewPointC: 10,
+                                     precipProbability: 0, precipitationMM: 0, windSpeedMPH: 4,
+                                     windSpeedKPH: 6, windGustMPH: 6, windGustKPH: 10,
+                                     windDirectionDegrees: 200, cloudCover: 0.1, cloudCoverLow: 0,
+                                     cloudCoverMedium: 0, cloudCoverHigh: 0.1, humidity: 0.15,
+                                     stationPressurePa: 89_000)
+            }
+            if scenarios.isEmpty { scenarios = Self.defaultScenarios(start: now, fahrenheit: useFahrenheit) }
+            preparing = false
+            return
+        }
+        #endif
         preparing = model == nil
         let resolution = StationReadingStore.resolveSource(context: context)
         var readings: [IndoorReading] = []
@@ -495,7 +555,7 @@ struct IndoorForecastView: View {
     /// pointer of each starts parked at the right-hand end, meaning no change.
     static func defaultScenarios(start: Date, fahrenheit: Bool) -> [IndoorForecast.Scenario] {
         [IndoorForecast.Scenario(id: 0, name: "nothing running", first: nil, second: nil),
-         IndoorForecast.Scenario(id: 1, name: "cooler",
+         IndoorForecast.Scenario(id: 1, name: "swamp",
                                  first: IndoorForecast.Change(date: start, state: .evaporativeCooler,
                                                               setpointC: nil),
                                  second: nil),
@@ -517,10 +577,20 @@ struct EventSlider: View {
     @Binding var first: IndoorForecast.Change?
     @Binding var second: IndoorForecast.Change?
     var onTap: (_ second: Bool) -> Void
+    /// Prefix for the accessibility identifiers of this slider's two pointers.
+    var identifier: String = "slider"
 
     /// Within this much of the right-hand end, the second pointer counts as
     /// parked: no event.
     private static let parkedFraction = 0.97
+    /// How far a finger may travel and still be a tap rather than a drag.
+    private static let tapSlop: CGFloat = 4
+    /// How near a pointer a tap has to land to count as tapping it.
+    private static let tapReach: CGFloat = 44
+
+    /// Which pointer this gesture is moving, and whether it has moved at all.
+    @State private var dragging: Bool?
+    @State private var moved = false
 
     var body: some View {
         GeometryReader { geo in
@@ -528,22 +598,44 @@ struct EventSlider: View {
             let firstFraction = fraction(first?.date) ?? 0
             let secondFraction = fraction(second?.date) ?? 1
             ZStack(alignment: .leading) {
+                // An explicit, full-row hit area. Relying on the stack's own
+                // bounds left most of the row untouchable.
+                Color.clear.frame(width: width, height: geo.size.height).contentShape(Rectangle())
                 Capsule().fill(Color.secondary.opacity(0.18)).frame(height: 4)
                     .frame(maxHeight: .infinity, alignment: .center)
                 // The stretch during which the first event's equipment runs.
                 if first != nil {
                     Capsule().fill(Color.accentColor.opacity(0.28))
-                        .frame(width: max(0, (secondFraction - firstFraction)) * width, height: 4)
+                        .frame(width: max(0, secondFraction - firstFraction) * width, height: 4)
                         .offset(x: firstFraction * width)
                         .frame(maxHeight: .infinity, alignment: .center)
                 }
                 thumb(at: firstFraction, width: width, filled: true)
-                    .gesture(drag(width: width, second: false))
-                    .onTapGesture { onTap(false) }
                 thumb(at: secondFraction, width: width, filled: second != nil)
-                    .gesture(drag(width: width, second: true))
-                    .onTapGesture { onTap(true) }
             }
+            // One gesture for the whole track, rather than one per pointer: a
+            // gesture attached to an offset thumb reports positions in the
+            // thumb's own space, which made every drag land somewhere else.
+            .contentShape(Rectangle())
+            .accessibilityIdentifier(identifier)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if dragging == nil {
+                            dragging = nearestIsSecond(to: value.startLocation.x, width: width)
+                        }
+                        guard abs(value.translation.width) > Self.tapSlop else { return }
+                        moved = true
+                        move(second: dragging ?? false, toX: value.location.x, width: width)
+                    }
+                    .onEnded { value in
+                        defer { dragging = nil; moved = false }
+                        guard !moved else { return }
+                        // A tap anywhere on the row opens the nearer pointer:
+                        // easier to hit than the 22-point circle, and there is
+                        // nothing else on the row to tap by mistake.
+                        onTap(nearestIsSecond(to: value.startLocation.x, width: width))
+                    })
         }
     }
 
@@ -553,7 +645,7 @@ struct EventSlider: View {
             .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2))
             .frame(width: 22, height: 22)
             .offset(x: min(max(fraction * width - 11, -11), width - 11))
-            .contentShape(Circle().inset(by: -8))
+            .allowsHitTesting(false)
     }
 
     private func fraction(_ date: Date?) -> Double? {
@@ -561,29 +653,33 @@ struct EventSlider: View {
         return min(max(date.timeIntervalSince(start) / horizon, 0), 1)
     }
 
-    private func drag(width: CGFloat, second: Bool) -> some Gesture {
-        DragGesture(minimumDistance: 2)
-            .onChanged { value in
-                let fraction = min(max(Double(value.location.x / max(width, 1)), 0), 1)
-                let when = start.addingTimeInterval(fraction * horizon)
-                if second {
-                    if fraction >= Self.parkedFraction {
-                        self.second = nil                       // parked: no event
-                    } else if var change = self.second {
-                        change.date = max(when, first?.date ?? start)
-                        self.second = change
-                    } else {
-                        // Dragged in from the end: the natural second event is
-                        // turning the equipment off again.
-                        self.second = IndoorForecast.Change(date: max(when, first?.date ?? start),
-                                                            state: .off, setpointC: nil)
-                    }
-                } else if var change = self.first {
-                    change.date = min(when, self.second?.date ?? start.addingTimeInterval(horizon))
-                    self.first = change
-                } else {
-                    self.first = IndoorForecast.Change(date: when, state: .evaporativeCooler, setpointC: nil)
-                }
+    /// Which pointer a touch at `x` belongs to: the nearer one.
+    private func nearestIsSecond(to x: CGFloat, width: CGFloat) -> Bool {
+        let firstX = (fraction(first?.date) ?? 0) * width
+        let secondX = (fraction(second?.date) ?? 1) * width
+        return abs(x - secondX) < abs(x - firstX)
+    }
+
+    private func move(second isSecond: Bool, toX x: CGFloat, width: CGFloat) {
+        let fraction = min(max(Double(x / max(width, 1)), 0), 1)
+        let when = start.addingTimeInterval(fraction * horizon)
+        if isSecond {
+            if fraction >= Self.parkedFraction {
+                second = nil                                    // parked: no event
+            } else if var change = second {
+                change.date = max(when, first?.date ?? start)
+                second = change
+            } else {
+                // Dragged in from the end: the natural second event is turning
+                // the equipment off again.
+                second = IndoorForecast.Change(date: max(when, first?.date ?? start),
+                                               state: .off, setpointC: nil)
             }
+        } else if var change = first {
+            change.date = min(when, second?.date ?? start.addingTimeInterval(horizon))
+            first = change
+        } else {
+            first = IndoorForecast.Change(date: when, state: .evaporativeCooler, setpointC: nil)
+        }
     }
 }

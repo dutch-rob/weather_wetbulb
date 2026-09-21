@@ -180,4 +180,23 @@ struct IndoorForecastTests {
         let wet = IndoorForecast.wetBulb(30, 12, 890)
         #expect(wet > 12 && wet < 30)
     }
+
+    // MARK: - Gridlines
+
+    @Test @MainActor func aTypicalDayIsLabelledEveryTenFahrenheitOrFiveCelsius() {
+        #expect(IndoorForecastView.labelStep(for: 35...93) == 10)
+        #expect(IndoorForecastView.labelStep(for: 2...34) == 5)
+        // A flat night still gets several labels, not one.
+        #expect(IndoorForecastView.labelStep(for: 70...78) == 2)
+    }
+
+    @Test @MainActor func halfwayLinesFallBetweenTheLabelledOnes() {
+        let domain = 35.0...93.0
+        let step = IndoorForecastView.labelStep(for: domain)
+        let labelled = IndoorForecastView.multiples(of: step, in: domain)
+        let halfway = IndoorForecastView.multiples(of: step / 2, in: domain)
+            .filter { abs(($0 / step).rounded() * step - $0) > 1e-9 }
+        #expect(labelled == [40, 50, 60, 70, 80, 90])
+        #expect(halfway == [35, 45, 55, 65, 75, 85])
+    }
 }

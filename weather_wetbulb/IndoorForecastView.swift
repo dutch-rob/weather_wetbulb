@@ -179,8 +179,30 @@ struct IndoorForecastView: View {
         return (low - pad).rounded(.down)...(high + pad).rounded(.up)
     }
 
+    /// Labelled gridlines on a round step giving about six labels, which is
+    /// ten degrees Fahrenheit or five Celsius for a typical day.
+    static func labelStep(for domain: ClosedRange<Double>) -> Double {
+        let span = domain.upperBound - domain.lowerBound
+        for step in [1.0, 2, 5, 10, 20] where span / step <= 7 { return step }
+        return 50
+    }
+
+    /// Every multiple of `step` inside the domain.
+    static func multiples(of step: Double, in domain: ClosedRange<Double>) -> [Double] {
+        let first = (domain.lowerBound / step).rounded(.up)
+        let last = (domain.upperBound / step).rounded(.down)
+        guard first <= last else { return [] }
+        return stride(from: first, through: last, by: 1).map { $0 * step }
+    }
+
     private func chart(_ runs: [(scenario: IndoorForecast.Scenario, points: [IndoorForecast.Point])]) -> some View {
-        Chart {
+        let yDomain = domain(runs)
+        let step = Self.labelStep(for: yDomain)
+        let labelled = Self.multiples(of: step, in: yDomain)
+        // Unlabelled lines halfway between the labelled ones.
+        let halfway = Self.multiples(of: step / 2, in: yDomain)
+            .filter { abs(($0 / step).rounded() * step - $0) > 1e-9 }
+        return Chart {
             ForEach(runs, id: \.scenario.id) { run in
                 ForEach(run.points) { point in
                     if graphTemp {
@@ -217,25 +239,41 @@ struct IndoorForecastView: View {
             }
         }
         .chartLegend(.hidden)
-        .chartYScale(domain: domain(runs))
+        .chartYScale(domain: yDomain)
         .chartXScale(domain: (start?.date ?? nowTick)...horizonEnd)
         .chartXAxis {
-            AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+            AxisMarks(values: .stride(by: .hour, count: 1)) { value in
                 AxisGridLine().foregroundStyle(.primary.opacity(0.2))
-                AxisTick().foregroundStyle(.primary.opacity(0.5))
-                AxisValueLabel {
+                // A short tick: a date axis's default one runs down through the
+                // label row, and would strike through a label centred on it.
+                AxisTick(centered: true, length: 4).foregroundStyle(.primary.opacity(0.5))
+                // This axis attaches a label by its leading edge whatever
+                // anchor it is given, so the label is started at the line and
+                // then drawn half its own width to the left: centred, for
+                // "15" and "noon" alike.
+                AxisValueLabel(centered: false, horizontalSpacing: 0) {
                     if let date = value.as(Date.self) {
                         Text(clockHourLabel(Calendar.current.component(.hour, from: date), use12: use12Hour))
                             .font(.caption)
+                            .visualEffect { content, geometry in
+                                content.offset(x: -geometry.size.width / 2)
+                            }
                     }
                 }
             }
         }
         .chartYAxis {
-            AxisMarks(position: .leading) { _ in
+            AxisMarks(position: .leading, values: labelled) { value in
                 AxisGridLine().foregroundStyle(.primary.opacity(0.2))
                 AxisTick().foregroundStyle(.primary.opacity(0.5))
-                AxisValueLabel().font(.caption)
+                AxisValueLabel {
+                    if let degrees = value.as(Double.self) {
+                        Text(degrees, format: .number.precision(.fractionLength(0))).font(.caption)
+                    }
+                }
+            }
+            AxisMarks(position: .leading, values: halfway) { _ in
+                AxisGridLine().foregroundStyle(.primary.opacity(0.1))
             }
         }
         .overlay(alignment: .topTrailing) {

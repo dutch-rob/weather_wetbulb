@@ -16,6 +16,15 @@ import Foundation
 
 struct ForecastSelectionTests {
 
+    /// Eight in the morning, local time — where a window begins, so a test can
+    /// say what the cuts should be without depending on the epoch.
+    private static let morning: Date = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar.date(bySettingHour: 8, minute: 0, second: 0,
+                             of: Date(timeIntervalSince1970: 1_700_000_000))!
+    }()
+
     /// Consecutive observations, each starting where the last one ended.
     private static func run(count: Int, from start: Date, stepSeconds: Double = 1200,
                             hvac: HVACState = .off) -> [IndoorObservation] {
@@ -32,7 +41,7 @@ struct ForecastSelectionTests {
     // MARK: - Windows
 
     @Test func aGapEndsTheWindowRatherThanBeingForecastAcross() {
-        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let start = Self.morning
         // Two hours of readings, a three-hour hole, then two more hours.
         let before = Self.run(count: 6, from: start)
         let after = Self.run(count: 12, from: start.addingTimeInterval(6 * 1200 + 3 * 3600))
@@ -44,7 +53,7 @@ struct ForecastSelectionTests {
     }
 
     @Test func unknownEquipmentEndsTheWindowToo() {
-        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let start = Self.morning
         var rows = Self.run(count: 12, from: start)
         rows += Self.run(count: 1, from: start.addingTimeInterval(12 * 1200), hvac: .unknown)
         rows += Self.run(count: 12, from: start.addingTimeInterval(13 * 1200))
@@ -53,16 +62,29 @@ struct ForecastSelectionTests {
         #expect(windows.allSatisfy { window in window.allSatisfy { $0.hvac != .unknown } })
     }
 
-    @Test func aLongStretchIsCutIntoDays() {
-        // Three days without a break: forecasts restart rather than running for
-        // three days, which is not what the app is ever asked for.
-        let windows = IndoorModelEstimator.forecastWindows(
-            Self.run(count: 3 * 72, from: Date(timeIntervalSince1970: 1_700_000_000)))
-        #expect(windows.count == 3)
+    @Test func aLongStretchIsCutIntoHalfDays() {
+        // Three days without a break, from 08:00: forecasts restart at each
+        // 08:00 and 20:00 rather than running for three days, which is not what
+        // the app is ever asked for. Six windows, not three days.
+        let windows = IndoorModelEstimator.forecastWindows(Self.run(count: 3 * 72, from: Self.morning))
+        #expect(windows.count == 6)
         for window in windows {
             let span = window.last!.date.timeIntervalSince(window.first!.date)
             #expect(span <= IndoorModelEstimator.forecastWindowHours * 3600)
         }
+    }
+
+    @Test func aWindowBreaksAtEightAndAtTwenty() {
+        // Whatever time the readings start, the cuts land on the half-day
+        // boundaries, so one window is a day and the next is a night.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let from = calendar.date(byAdding: .hour, value: 3, to: Self.morning)!   // 11:00
+        // Twenty-four hours from 11:00 crosses 20:00 and then 08:00.
+        let windows = IndoorModelEstimator.forecastWindows(Self.run(count: 72, from: from))
+        #expect(windows.count == 3)
+        #expect(windows.map { calendar.component(.hour, from: $0[0].date) } == [11, 20, 8])
+        #expect(windows.allSatisfy { calendar.component(.minute, from: $0[0].date) == 0 })
     }
 
     // MARK: - Forecasting

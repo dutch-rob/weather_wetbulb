@@ -114,10 +114,30 @@ nonisolated enum IndoorModelEstimator {
     // MARK: - Forecast scoring
 
     /// Longest a forecast runs before it is restarted, and the shortest stretch
-    /// worth scoring. A day is what the app is asked for; three hours is long
-    /// enough for the slow terms to show.
-    static let forecastWindowHours: Double = 24
+    /// worth scoring. Twelve hours is what the forecast screen shows and about
+    /// as far as this model should be trusted; three hours is long enough for
+    /// the slow terms to show.
+    ///
+    /// Windows start at 08:00 or 20:00 so that every one of them covers a day
+    /// or a night rather than some arbitrary slice, and so that the score means
+    /// the same thing from one week to the next. A score whose horizon grew
+    /// with the record could not be compared with itself.
+    static let forecastWindowHours: Double = 12
     static let minimumForecastWindowHours: Double = 3
+    /// Whether 08:00 or 20:00 falls between two readings, which is where one
+    /// window ends and the next begins.
+    static func crossesHalfDay(_ a: Date, _ b: Date) -> Bool {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        for hour in [8, 20] {
+            guard let boundary = calendar.nextDate(after: a, matching: DateComponents(hour: hour, minute: 0),
+                                                   matchingPolicy: .nextTime)
+            else { continue }
+            if boundary <= b { return true }
+        }
+        return false
+    }
+
     /// Contiguous blocks the record is cut into. Each is forecast by a model
     /// fitted without it, so no window is ever predicted by its own rows.
     static let scoringBlocks = 4
@@ -143,7 +163,7 @@ nonisolated enum IndoorModelEstimator {
                 let expected = previous.date.addingTimeInterval(previous.dt)
                 let broken = abs(o.date.timeIntervalSince(expected)) > 60
                 let full = o.date.timeIntervalSince(current[0].date) >= forecastWindowHours * 3600
-                if broken || full { flush() }
+                if broken || full || crossesHalfDay(previous.date, o.date) { flush() }
             }
             current.append(o)
         }

@@ -233,8 +233,8 @@ struct ModelReportView: View {
                                         ThermalLags.indoorMassHours, ThermalLags.envelopeHours,
                                         ThermalLags.slowMoistureHours))
             if let forecast = r.forecastScore {
-                row("Day-ahead error", String(format: "%.2f °C temp, %.2f °C dew pt",
-                                              forecast.temperatureMAE, forecast.dewPointMAE))
+                row("12-hour forecast error", String(format: "%.2f °C temp, %.2f °C dew pt",
+                                                     forecast.temperatureMAE, forecast.dewPointMAE))
             }
             if let searched = r.structureSearchedAt {
                 row("Structure chosen", Self.stamp(searched))
@@ -479,7 +479,7 @@ struct ModelReportView: View {
         var coolerNote: String = ""
         /// Bearing the house appears most exposed to, when one was fitted.
         var exposureBearing: Double?
-        /// Day-ahead error of this structure, from the search that chose it.
+        /// Twelve-hour forecast error of this structure, from the search that chose it.
         var forecastScore: IndoorModel.ForecastScore?
         /// When the structure was last searched for, as opposed to refitted.
         var structureSearchedAt: Date?

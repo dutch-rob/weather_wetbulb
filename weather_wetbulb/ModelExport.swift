@@ -135,7 +135,7 @@ struct ModelExport: Codable {
             lagHours = ["indoorMass": ThermalLags.indoorMassHours,
                         "envelope": ThermalLags.envelopeHours,
                         "slowMoisture": ThermalLags.slowMoistureHours,
-                        "fastMoisture": ThermalLags.fastMoistureHours]
+                        ]
             sources = Dictionary(uniqueKeysWithValues:
                 OutdoorVariable.allCases.map { ($0.rawValue, m.plan[$0].rawValue) })
             exposure = m.exposure.rawValue

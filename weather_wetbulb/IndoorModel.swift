@@ -245,23 +245,21 @@ nonisolated struct ThermalLags: Sendable, Equatable, Codable {
     static let indoorMassHours = 64.0
     static let envelopeHours = 16.0
     static let slowMoistureHours = 64.0
-    static let fastMoistureHours = 1.0
 
     var indoorMassC: Double
     var envelopeC: Double
     var slowDewPointC: Double
-    var fastDewPointC: Double
 
     /// Lags sitting exactly where the room is, so every lag term contributes
     /// nothing. What a model falls back to when no history came with the row.
     static func matching(_ o: IndoorObservation) -> ThermalLags {
         ThermalLags(indoorMassC: o.indoorTempC, envelopeC: o.indoorTempC,
-                    slowDewPointC: o.indoorDewPointC, fastDewPointC: o.indoorDewPointC)
+                    slowDewPointC: o.indoorDewPointC)
     }
 
     static func starting(indoorTempC: Double, outdoorTempC: Double?, indoorDewPointC: Double) -> ThermalLags {
         ThermalLags(indoorMassC: indoorTempC, envelopeC: outdoorTempC ?? indoorTempC,
-                    slowDewPointC: indoorDewPointC, fastDewPointC: indoorDewPointC)
+                    slowDewPointC: indoorDewPointC)
     }
 
     /// Advance every lag over `dt`, driven by the values at the step's start.
@@ -274,8 +272,7 @@ nonisolated struct ThermalLags: Sendable, Equatable, Codable {
         return ThermalLags(
             indoorMassC: lag(indoorMassC, toward: indoorTempC, Self.indoorMassHours),
             envelopeC: lag(envelopeC, toward: outdoorTempC ?? envelopeC, Self.envelopeHours),
-            slowDewPointC: lag(slowDewPointC, toward: indoorDewPointC, Self.slowMoistureHours),
-            fastDewPointC: lag(fastDewPointC, toward: indoorDewPointC, Self.fastMoistureHours))
+            slowDewPointC: lag(slowDewPointC, toward: indoorDewPointC, Self.slowMoistureHours))
     }
 
     /// Advance a lag driven only by outdoor air, for seeding the envelope from
@@ -878,7 +875,7 @@ nonisolated struct IndoorModel: Sendable, Equatable {
     // coefficient once came out at zero.
 
     /// Columns the equipment half contributes to either equation.
-    static let equipmentColumns = 5
+    static let equipmentColumns = 7
 
     /// Nothing-running rows needed before the passive half is fitted on them
     /// alone rather than on everything.
@@ -911,8 +908,7 @@ nonisolated struct IndoorModel: Sendable, Equatable {
                 lags.slowDewPointC - o.indoorDewPointC,
                 1,
                 wind.wind * gradient,
-                wind.gustExcess * gradient,
-                lags.fastDewPointC - o.indoorDewPointC]
+                wind.gustExcess * gradient]
     }
 
     /// What the running equipment adds to dT_in/dt, given what the passive
@@ -933,6 +929,19 @@ nonisolated struct IndoorModel: Sendable, Equatable {
         return [// Energy spent condensing water is energy not spent cooling, so
                 // this is expected POSITIVE: the harder it dries, the less it cools.
                 duty * coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut),
+                // An offset for each machine. Two things land here. What a
+                // machine achieves is not exactly what its supply air says it
+                // should — the fan's own heat, ducts that leak, a cooler whose
+                // pads are past their best. And the passive half was fitted on
+                // hours with nothing running, so its terms do not all hold
+                // while a fan is moving the air through the house; the offset
+                // carries that difference too.
+                //
+                // Both would otherwise distort the term carrying the physics,
+                // which is the one the forecast leans on when conditions go
+                // outside anything in the record.
+                o.hvac == .evaporativeCooler ? 1 : 0,
+                o.hvac == .vent ? 1 : 0,
                 o.hvac == .evaporativeCooler
                     ? cooler.supplyTemperatureC(outdoorC: tOut, wetBulbC: wetBulb) - o.indoorTempC : 0,
                 // Venting drags the room toward outdoor AIR temperature: there
@@ -963,6 +972,8 @@ nonisolated struct IndoorModel: Sendable, Equatable {
                 // terms take it back toward outdoors, which is why the duty
                 // matters rather than merely "the AC is on".
                 duty * coil.latentDrive(indoorDewPointC: o.indoorDewPointC, outdoorC: tOut),
+                o.hvac == .evaporativeCooler ? 1 : 0,
+                o.hvac == .vent ? 1 : 0,
                 o.hvac == .evaporativeCooler
                     ? cooler.supplyDewPointC(outdoorDewPointC: dOut, wetBulbC: wetBulb) - o.indoorDewPointC : 0,
                 o.hvac == .vent ? dOut - o.indoorDewPointC : 0,
@@ -980,8 +991,9 @@ nonisolated struct IndoorModel: Sendable, Equatable {
 
     // MARK: Labels
 
-    static let equipmentLabels = ["AC dehumidifying", "evaporative cooler",
-                                  "vent (cooler, dry)", "air conditioning", "heating"]
+    static let equipmentLabels = ["AC dehumidifying", "cooler baseline", "vent baseline",
+                                  "evaporative cooler", "vent (cooler, dry)",
+                                  "air conditioning", "heating"]
 
     /// Human-readable names for `temperature`, in coefficient order.
     var temperatureLabels: [String] {
@@ -997,8 +1009,7 @@ nonisolated struct IndoorModel: Sendable, Equatable {
         ["moisture exchange (out − in)",
          String(format: "slow moisture buffer (τ %.0f h)", ThermalLags.slowMoistureHours),
          "baseline moisture (occupants)",
-         "wind × ΔDp", "gustiness × ΔDp",
-         String(format: "fast moisture buffer (τ %.0f h)", ThermalLags.fastMoistureHours)]
+         "wind × ΔDp", "gustiness × ΔDp"]
             + Self.equipmentLabels
     }
 
@@ -1035,6 +1046,8 @@ nonisolated struct IndoorModel: Sendable, Equatable {
     }
     static let equipmentTemperatureConstraints: [LeastSquares.SignConstraint] = [
         .nonNegative,   // AC drying costs cooling power
+        .free,          // whatever the cooler does beyond its supply air
+        .free,          // and the vent beyond outdoor air
         .nonNegative,   // cooler pulls toward its supply air
         .nonNegative,   // vent pulls toward outdoor
         .nonPositive,   // AC cools
@@ -1050,10 +1063,11 @@ nonisolated struct IndoorModel: Sendable, Equatable {
         .nonNegative,   // and toward what the house has been holding
         .free,          // occupants add moisture; an empty house loses it
         .free, .free,   // wind and gustiness modulate the exchange
-        .nonNegative,   // the fast buffer, likewise
     ]
     static let equipmentDewPointConstraints: [LeastSquares.SignConstraint] = [
         .nonPositive,   // the AC condenses moisture out
+        .free,          // whatever the cooler does beyond its supply dew point
+        .free,          // and the vent beyond outdoor air
         .nonNegative,   // the cooler adds moisture toward its supply dew point
         .nonNegative,   // venting pulls toward outdoor
         .free,          // what the AC does beyond the coil term
@@ -1075,6 +1089,7 @@ nonisolated struct IndoorModel: Sendable, Equatable {
                     cooler: CoolerEffectiveness = CoolerEffectiveness(),
                     exposure: SolarExposureEncoding = .none,
                     thermostat: ACThermostat = ACThermostat(),
+                    settleCapacity: Bool = true,
                     now: Date = .now) -> IndoorModel? {
 
         // Rows whose lags still remember where they were started teach the
@@ -1131,6 +1146,14 @@ nonisolated struct IndoorModel: Sendable, Equatable {
                 equipmentT = bT; equipmentD = bD
                 // The cooling coefficient IS the capacity the duty was computed
                 // with; where they disagree, take the fitted one and go again.
+                //
+                // Only when nobody has chosen a capacity. Settling it this way
+                // is self-consistent but weak: too small a capacity holds the
+                // duty at one, which makes the fitted rate the average cooling
+                // rather than the machine's power, and that average is a
+                // capacity small enough to keep the duty at one. The search
+                // escapes by judging capacities on how they forecast.
+                guard settleCapacity else { break }
                 let cooling = abs(bT[equipmentColumns - 2])
                 let settled = abs(cooling - thermo.capacityCPerHour) < 0.02
                 if cooling > 0.05 { thermo.capacityCPerHour = min(max(cooling, 0.25), 8) }

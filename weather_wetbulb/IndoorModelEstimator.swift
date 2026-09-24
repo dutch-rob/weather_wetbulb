@@ -107,7 +107,8 @@ nonisolated enum IndoorModelEstimator {
                     now: Date = .now) -> IndoorModel? {
         IndoorModel.fit(train: train, test: test, plan: structure.plan,
                         coil: structure.coil, cooler: structure.cooler,
-                        exposure: structure.solarExposure, thermostat: structure.thermostat, now: now)
+                        exposure: structure.solarExposure, thermostat: structure.thermostat,
+                        settleCapacity: false, now: now)
     }
 
     // MARK: - Forecast scoring
@@ -161,6 +162,7 @@ nonisolated enum IndoorModelEstimator {
                               cooler: CoolerEffectiveness = CoolerEffectiveness(),
                               exposure: SolarExposureEncoding = .none,
                               thermostat: ACThermostat = ACThermostat(),
+                              settleCapacity: Bool = true,
                               blocks: Int = scoringBlocks,
                               now: Date = .now) -> IndoorModel.ForecastScore? {
         let sorted = all.sorted { $0.date < $1.date }
@@ -174,7 +176,8 @@ nonisolated enum IndoorModelEstimator {
             let train = Array(sorted[..<lower]) + Array(sorted[upper...])
             guard let model = IndoorModel.fit(train: train, test: held, plan: plan, coil: coil,
                                               cooler: cooler, exposure: exposure,
-                                              thermostat: thermostat, now: now) else { continue }
+                                              thermostat: thermostat, settleCapacity: settleCapacity,
+                                              now: now) else { continue }
             for window in forecastWindows(held) {
                 guard let errors = model.forecastErrors(over: window) else { continue }
                 errorsT.append(contentsOf: errors.temperature.map(abs))
@@ -214,6 +217,8 @@ nonisolated enum IndoorModelEstimator {
         var coilNote: String = ""
         /// The same for the swamp cooler's effectiveness.
         var coolerNote: String = ""
+        /// How the AC's cooling power was arrived at.
+        var powerNote: String = ""
         /// How well the winning structure forecasts, cross-validated over the
         /// whole record. This is what the search compared.
         var forecastScore: IndoorModel.ForecastScore?
@@ -237,6 +242,7 @@ nonisolated enum IndoorModelEstimator {
     static func refineCooler(model: IndoorModel,
                              train: [IndoorObservation],
                              test: [IndoorObservation],
+                             settleCapacity: Bool = true,
                              now: Date = .now) -> (model: IndoorModel, note: String) {
         let rows = (train + test).filter { $0.hvac == .evaporativeCooler }
         guard rows.count >= coolerSearchMinimumObservations else {
@@ -253,7 +259,8 @@ nonisolated enum IndoorModelEstimator {
         var best = model
         var bestScore = forecastScore(all: train + test, plan: model.plan, coil: model.coil,
                                       cooler: model.cooler, exposure: model.exposure,
-                                      thermostat: model.thermostat, now: now)
+                                      thermostat: model.thermostat, settleCapacity: settleCapacity,
+                                      now: now)
         for fraction in stride(from: coolerEffectivenessRange.lowerBound,
                                through: coolerEffectivenessRange.upperBound, by: 0.02) {
             let cooler = CoolerEffectiveness(fraction: fraction)
@@ -261,11 +268,13 @@ nonisolated enum IndoorModelEstimator {
                                                   plan: model.plan,
                                                   coil: model.coil, cooler: cooler,
                                                   exposure: model.exposure,
-                                                  thermostat: model.thermostat, now: now)
+                                                  thermostat: model.thermostat,
+                                                  settleCapacity: settleCapacity, now: now)
             else { continue }
             let score = forecastScore(all: train + test, plan: model.plan, coil: model.coil,
                                       cooler: cooler, exposure: model.exposure,
-                                      thermostat: model.thermostat, now: now)
+                                      thermostat: model.thermostat, settleCapacity: settleCapacity,
+                                      now: now)
             switch (score, bestScore) {
             case let (new?, current?): if new < current { best = candidate; bestScore = new }
             case (nil, nil):           if candidate.score < best.score { best = candidate }
@@ -300,6 +309,57 @@ nonisolated enum IndoorModelEstimator {
     /// is not a relationship, it is noise with a direction.
     static let coilSlopeMinimumObservations = 30
     static let coilSlopeMinimumOutdoorSpreadC: Double = 5
+
+    /// Cooling at full duty to try, °C per hour.
+    ///
+    /// The top of the grid is where the duty stops saturating: past about
+    /// 3 °C/h the thermostat is proportional control that never reaches full
+    /// power, which keeps flattering the temperature while the dew point gets
+    /// worse, so a wider grid would buy one equation at the other's expense.
+    /// This house currently chooses the top of the band.
+    static let acCapacities: [Double] = [0.5, 0.75, 1, 1.5, 2, 3]
+
+    /// Search the AC's power by forecast, holding everything else fixed.
+    ///
+    /// Capacity cannot be read off a least-squares fit: it appears only
+    /// through the duty, and any capacity low enough to saturate the duty
+    /// reproduces the same average cooling. What separates them is the shape
+    /// of a run — a powerful machine reaches the setpoint and then cycles,
+    /// a weak one pulls down all afternoon — and shape is what a forecast
+    /// scores.
+    static func refineACPower(model: IndoorModel,
+                              train: [IndoorObservation],
+                              test: [IndoorObservation],
+                              now: Date = .now) -> (model: IndoorModel, note: String) {
+        let acRows = (train + test).filter { $0.hvac == .airConditioning }
+        guard acRows.count >= coilSearchMinimumObservations else {
+            return (model, String(format: "%.2f °C/h from the fit — only %d AC observations",
+                                  model.thermostat.capacityCPerHour, acRows.count))
+        }
+        var best = model
+        var bestScore: IndoorModel.ForecastScore?
+        for capacity in acCapacities {
+            let thermostat = ACThermostat(capacityCPerHour: capacity)
+            guard let candidate = IndoorModel.fit(train: train, test: test, plan: model.plan,
+                                                  coil: model.coil, cooler: model.cooler,
+                                                  exposure: model.exposure, thermostat: thermostat,
+                                                  settleCapacity: false, now: now)
+            else { continue }
+            let score = forecastScore(all: train + test, plan: model.plan, coil: model.coil,
+                                      cooler: model.cooler, exposure: model.exposure,
+                                      thermostat: thermostat, settleCapacity: false, now: now)
+            switch (score, bestScore) {
+            case let (new?, current?): if new < current { best = candidate; bestScore = new }
+            case (_?, nil):            best = candidate; bestScore = score
+            default:                   break
+            }
+        }
+        guard bestScore != nil else {
+            return (model, String(format: "%.2f °C/h from the fit — no forecast to judge by",
+                                  model.thermostat.capacityCPerHour))
+        }
+        return (best, String(format: "%.2f °C/h, chosen by forecast", best.thermostat.capacityCPerHour))
+    }
 
     /// Search coil parameters by held-out error, holding the sources fixed.
     ///
@@ -428,7 +488,11 @@ nonisolated enum IndoorModelEstimator {
             let coil = refineCoil(model: winner.model, train: train, test: test, now: now)
             winner.model = coil.model
             winner.coilNote = coil.note
-            let cooler = refineCooler(model: winner.model, train: train, test: test, now: now)
+            let power = refineACPower(model: winner.model, train: train, test: test, now: now)
+            winner.model = power.model
+            winner.powerNote = power.note
+            let cooler = refineCooler(model: winner.model, train: train, test: test,
+                                      settleCapacity: false, now: now)
             winner.model = cooler.model
             winner.coolerNote = cooler.note
             // The refinements moved the model, so the headline forecast score
@@ -436,7 +500,8 @@ nonisolated enum IndoorModelEstimator {
             winner.forecastScore = forecastScore(all: all, plan: winner.model.plan,
                                                  coil: winner.model.coil, cooler: winner.model.cooler,
                                                  exposure: winner.model.exposure,
-                                                 thermostat: winner.model.thermostat, now: now)
+                                                 thermostat: winner.model.thermostat,
+                                                 settleCapacity: false, now: now)
                 ?? winner.forecastScore
             best = winner
         }

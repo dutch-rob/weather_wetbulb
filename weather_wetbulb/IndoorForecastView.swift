@@ -537,7 +537,7 @@ struct IndoorForecastView: View {
                                 fittedAt: now, observationCount: 500)
             start = IndoorForecast.Start(date: now, temperatureC: 27.5, dewPointC: 9,
                                          lags: ThermalLags(indoorMassC: 28, envelopeC: 26,
-                                                           slowDewPointC: 9.5, fastDewPointC: 9),
+                                                           slowDewPointC: 9.5),
                                          pressureHPa: 890)
             blocker = nil
             previewWeather = (0...13).map { hour -> ForecastPoint in

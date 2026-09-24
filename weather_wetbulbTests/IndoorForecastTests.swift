@@ -40,14 +40,15 @@ struct IndoorForecastTests {
     /// A model with round numbers: the house leaks slowly, the cooler pulls
     /// hard toward its supply air, the AC cools a degree an hour at full duty.
     private static func model() -> IndoorModel {
-        // Passive temperature: conduction, daytime, indoor mass, envelope.
-        // Then equipment: AC drying penalty, cooler, vent, AC duty, heating.
+        // Passive temperature: conduction, daytime, indoor mass, envelope. Then
+        // equipment: AC drying penalty, cooler and vent offsets, cooler, vent,
+        // AC duty, heating.
         let temperature = [0.05, 0, 0, 0,
-                           0, 0.6, 0.2, -1.0, 0]
-        // Passive dew point: exchange, slow buffer, constant, wind, gust, fast
-        // buffer. Then the same five equipment slots.
-        let dewPoint = [0.05, 0, 0, 0, 0, 0,
-                        0, 1.0, 0.2, 0, 0]
+                           0, 0, 0, 0.6, 0.2, -1.0, 0]
+        // Passive dew point: exchange, slow buffer, constant, wind, gust. Then
+        // the same seven equipment slots.
+        let dewPoint = [0.05, 0, 0, 0, 0,
+                        0, 0, 0, 1.0, 0.2, 0, 0]
         return IndoorModel(plan: OutdoorSourcePlan(all: .weatherKit),
                            coil: CoilTemperature(baseC: 8, perOutdoorDegree: 0.15),
                            cooler: CoolerEffectiveness(fraction: 0.83),
@@ -62,7 +63,7 @@ struct IndoorForecastTests {
     private static func beginning(temperatureC: Double = 28, dewPointC: Double = 10) -> IndoorForecast.Start {
         IndoorForecast.Start(date: start, temperatureC: temperatureC, dewPointC: dewPointC,
                              lags: ThermalLags(indoorMassC: temperatureC, envelopeC: temperatureC,
-                                               slowDewPointC: dewPointC, fastDewPointC: dewPointC),
+                                               slowDewPointC: dewPointC),
                              pressureHPa: 890)
     }
 

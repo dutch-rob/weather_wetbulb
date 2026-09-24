@@ -140,7 +140,7 @@ struct IndoorModelTests {
         // The constraint that matters most: whatever the residuals look like,
         // running a swamp cooler must never come out as warming the house.
         let constraints = IndoorModel.temperatureConstraints(.none)
-        let count = 9                               // four passive terms plus five for equipment
+        let count = 11                              // four passive terms plus seven for equipment
         #expect(constraints.count == count)
         let coolerIndex = IndoorModel.equipmentIndex(.evaporativeCooler, in: count)!
         let heatIndex = IndoorModel.equipmentIndex(.heating, in: count)!
@@ -149,6 +149,43 @@ struct IndoorModelTests {
         #expect(!constraints[coolerIndex].violated(by: 0.1))
         #expect(constraints[heatIndex].violated(by: -0.1))
         #expect(constraints[acIndex].violated(by: 0.1))     // AC cannot warm
+    }
+
+    @Test func eachMachineCarriesItsOwnOffset() {
+        // The offset columns must be one only while that machine runs, or a
+        // cooler's shortfall would be charged to the hours it was off.
+        let outdoor = OutdoorValues(temperatureC: 33, humidity: 15, windSpeedMS: 2, windGustMS: 3,
+                                    windDirectionDeg: 180, rainfallMM: 0, stationPressureHPa: 890)
+        func row(_ state: HVACState) -> [Double]? {
+            let o = IndoorObservation(
+                date: Date(timeIntervalSince1970: 1_700_000_000), dt: 1200,
+                indoorTempC: 26, indoorDewPointC: 10, nextIndoorTempC: 26, nextIndoorDewPointC: 10,
+                weatherKit: outdoor, station: outdoor, solar: 0, hvac: state)
+            return IndoorModel.equipmentTemperatureRow(
+                o, OutdoorSourcePlan(all: .station),
+                CoilTemperature(), CoolerEffectiveness(), ACThermostat(), passiveRate: 0)
+        }
+        guard let cooling = row(.evaporativeCooler), let venting = row(.vent), let idle = row(.off)
+        else { #expect(Bool(false)); return }
+        #expect(cooling[1] == 1 && cooling[2] == 0)
+        #expect(venting[1] == 0 && venting[2] == 1)
+        #expect(idle[1] == 0 && idle[2] == 0)
+    }
+
+    @Test func aChosenCapacityIsNotOverwrittenByTheFit() {
+        // The search picks the AC's power by forecast; refitting afterwards
+        // must leave it alone, or every refinement would undo the choice.
+        let house = SyntheticHouse()
+        let rows = house.observations(count: 120) + house.observations(count: 80, hvac: .airConditioning)
+        let (train, test) = IndoorModelEstimator.split(rows.sorted { $0.date < $1.date })
+        for capacity in [0.75, 2.5] {
+            guard let kept = IndoorModel.fit(train: train, test: test,
+                                             plan: OutdoorSourcePlan(all: .station),
+                                             thermostat: ACThermostat(capacityCPerHour: capacity),
+                                             settleCapacity: false)
+            else { #expect(Bool(false)); return }
+            #expect(kept.thermostat.capacityCPerHour == capacity)
+        }
     }
 
     // MARK: - Synthetic house
@@ -176,7 +213,7 @@ struct IndoorModelTests {
             var indoorD = 8.0
             // The slow parts start where the house starts, and follow it from
             // there, exactly as the builder walks them across real readings.
-            var lags = ThermalLags(indoorMassC: 22, envelopeC: 18, slowDewPointC: 8, fastDewPointC: 8)
+            var lags = ThermalLags(indoorMassC: 22, envelopeC: 18, slowDewPointC: 8)
             let start = Date(timeIntervalSince1970: 1_700_000_000)
             let hours = stepSeconds / 3600
 

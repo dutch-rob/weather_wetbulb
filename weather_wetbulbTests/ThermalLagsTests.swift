@@ -36,19 +36,18 @@ struct ThermalLagsTests {
     // MARK: - The lags themselves
 
     @Test func aLagClosesMostOfTheGapAfterItsTimeConstant() {
-        var lags = ThermalLags(indoorMassC: 20, envelopeC: 20, slowDewPointC: 5, fastDewPointC: 5)
-        // One fast-buffer time constant of being held at 10 °C.
-        lags = lags.advanced(indoorTempC: 20, outdoorTempC: 20, indoorDewPointC: 10,
-                             dt: ThermalLags.fastMoistureHours * 3600)
-        // 1 − 1/e of the way from 5 toward 10.
-        #expect(abs(lags.fastDewPointC - (5 + 5 * (1 - exp(-1)))) < 1e-9)
-        // The slow buffer has the same driver but a far longer memory, so it
-        // has barely moved.
-        #expect(lags.slowDewPointC < 5.1)
+        var lags = ThermalLags(indoorMassC: 20, envelopeC: 20, slowDewPointC: 5)
+        // One envelope time constant of outdoor air held at 30 °C.
+        lags = lags.advanced(indoorTempC: 20, outdoorTempC: 30, indoorDewPointC: 5,
+                             dt: ThermalLags.envelopeHours * 3600)
+        // 1 − 1/e of the way from 20 toward 30.
+        #expect(abs(lags.envelopeC - (20 + 10 * (1 - exp(-1)))) < 1e-9)
+        // The indoor mass has a far longer memory, so it has barely moved.
+        #expect(lags.indoorMassC == 20)
     }
 
     @Test func theEnvelopeFollowsOutdoorAirNotTheRoom() {
-        let start = ThermalLags(indoorMassC: 22, envelopeC: 22, slowDewPointC: 8, fastDewPointC: 8)
+        let start = ThermalLags(indoorMassC: 22, envelopeC: 22, slowDewPointC: 8)
         let after = start.advanced(indoorTempC: 22, outdoorTempC: 40, indoorDewPointC: 8, dt: 4 * 3600)
         #expect(after.envelopeC > 22)          // dragged toward the hot outside
         #expect(after.indoorMassC == 22)       // the room did not move, so the mass did not either
@@ -66,8 +65,7 @@ struct ThermalLagsTests {
     }
 
     @Test func aWarmerMassPushesTheRoomUp() {
-        let o = Self.observation(lags: ThermalLags(indoorMassC: 27, envelopeC: 24,
-                                                   slowDewPointC: 10, fastDewPointC: 10))
+        let o = Self.observation(lags: ThermalLags(indoorMassC: 27, envelopeC: 24, slowDewPointC: 10))
         guard let row = IndoorModel.passiveTemperatureRow(o, OutdoorSourcePlan(all: .station), .none)
         else { #expect(Bool(false)); return }
         #expect(abs(row[2] - 3) < 1e-9)        // mass 27 against a room at 24

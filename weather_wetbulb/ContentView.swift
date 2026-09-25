@@ -260,7 +260,11 @@ struct ContentView: View {
             pushToWatch()
             if indoorTracking {
                 IndoorSamplingCoordinator.shared.scheduleBackgroundSample()
-                await IndoorSamplingCoordinator.shared.sampleIfDue()
+                // Not awaited: this reads the station's archive from iCloud and
+                // can take several seconds, during which the graph would have
+                // nothing to draw. Nothing on screen waits for indoor data, and
+                // the graph is what the person opened the app to see.
+                Task { await IndoorSamplingCoordinator.shared.sampleIfDue() }
             }
             await loadWeather()
             places.refreshWeatherIfNeeded()

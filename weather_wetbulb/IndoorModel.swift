@@ -877,6 +877,60 @@ nonisolated struct IndoorModel: Sendable, Equatable {
     /// Columns the equipment half contributes to either equation.
     static let equipmentColumns = 7
 
+    /// How many twenty-minute rows one long row is worth, and the shortest
+    /// stretch that earns one.
+    ///
+    /// A fit that only ever sees twenty minutes at a time is free to be wrong
+    /// in ways that cancel over one step and compound over twelve hours. One
+    /// extra row per unbroken stretch fixes that: the time-weighted mean of its
+    /// regressors against the mean rate the house actually achieved from end to
+    /// end. It is linear in the coefficients — an integral along the observed
+    /// path is a weighted sum of the ordinary rows — so it costs a row in the
+    /// same normal equations rather than an optimiser over simulations.
+    ///
+    /// Ten is a compromise: heavier weights forecast better on average and less
+    /// reliably, measured over thirty half-day windows.
+    static let longRowWeight = 10.0
+    static let longRowMinimumHours = 2.0
+    static let longRowMaximumHours = 12.0
+
+    /// Unbroken runs of one equipment state, split where a reading is missing
+    /// and capped at half a day.
+    static func stretches(_ rows: [IndoorObservation]) -> [[IndoorObservation]] {
+        var out: [[IndoorObservation]] = [], current: [IndoorObservation] = []
+        for o in rows.sorted(by: { $0.date < $1.date }) {
+            if let previous = current.last {
+                let expected = previous.date.addingTimeInterval(previous.dt)
+                let broken = abs(o.date.timeIntervalSince(expected)) > 60 || o.hvac != previous.hvac
+                let full = o.date.timeIntervalSince(current[0].date) >= longRowMaximumHours * 3600
+                if broken || full { out.append(current); current = [] }
+            }
+            current.append(o)
+        }
+        out.append(current)
+        return out.filter { run in
+            guard let a = run.first, let b = run.last else { return false }
+            return b.date.addingTimeInterval(b.dt).timeIntervalSince(a.date) >= longRowMinimumHours * 3600
+        }
+    }
+
+    /// One long row from a stretch: every regressor and the rate itself
+    /// averaged over it, weighted by time.
+    static func longRow(_ run: [IndoorObservation], row: (IndoorObservation) -> [Double]?,
+                        target: (IndoorObservation) -> Double, width: Int) -> (x: [Double], y: Double)? {
+        var x = [Double](repeating: 0, count: width), y = 0.0, hours = 0.0
+        for o in run {
+            guard let r = row(o), r.count == width else { return nil }
+            let h = o.dt / 3600
+            for i in 0..<width { x[i] += r[i] * h }
+            y += target(o) * h
+            hours += h
+        }
+        guard hours > 0 else { return nil }
+        let w = longRowWeight.squareRoot() / hours
+        return (x.map { $0 * w }, y * w)
+    }
+
     /// Nothing-running rows needed before the passive half is fitted on them
     /// alone rather than on everything.
     static let minimumPassiveRows = 20
@@ -1116,6 +1170,16 @@ nonisolated struct IndoorModel: Sendable, Equatable {
             guard tT.isFinite, tD.isFinite, rt.allSatisfy(\.isFinite), rd.allSatisfy(\.isFinite) else { continue }
             xT.append(rt); yT.append(tT); xD.append(rd); yD.append(tD)
         }
+        for run in stretches(passiveRows) {
+            if let r = longRow(run, row: { passiveTemperatureRow($0, plan, exposure) },
+                               target: { temperatureTarget($0) }, width: xT.first?.count ?? 0) {
+                xT.append(r.x); yT.append(r.y)
+            }
+            if let r = longRow(run, row: { passiveDewPointRow($0, plan) },
+                               target: { dewPointTarget($0) }, width: xD.first?.count ?? 0) {
+                xD.append(r.x); yD.append(r.y)
+            }
+        }
         guard let passiveT = LeastSquares.fit(x: xT, y: yT, constraints: passiveTemperatureConstraints(exposure)),
               let passiveD = LeastSquares.fit(x: xD, y: yD, constraints: passiveDewPointConstraints)
         else { return nil }
@@ -1139,6 +1203,28 @@ nonisolated struct IndoorModel: Sendable, Equatable {
                     guard tT.isFinite, tD.isFinite else { continue }
                     eT.append(rowT); rT.append(tT - passiveRate)
                     eD.append(rowD); rD.append(tD - passiveRateD)
+                }
+                for run in stretches(equipmentRows) {
+                    func passiveRate(_ o: IndoorObservation) -> Double? {
+                        passiveTemperatureRow(o, plan, exposure).map { zip($0, passiveT).reduce(0) { $0 + $1.0 * $1.1 } }
+                    }
+                    func passiveRateD(_ o: IndoorObservation) -> Double? {
+                        passiveDewPointRow(o, plan).map { zip($0, passiveD).reduce(0) { $0 + $1.0 * $1.1 } }
+                    }
+                    if let r = longRow(run,
+                                       row: { o in passiveRate(o).flatMap {
+                                           equipmentTemperatureRow(o, plan, coil, cooler, thermo, passiveRate: $0) } },
+                                       target: { o in temperatureTarget(o) - (passiveRate(o) ?? 0) },
+                                       width: equipmentColumns) {
+                        eT.append(r.x); rT.append(r.y)
+                    }
+                    if let r = longRow(run,
+                                       row: { o in passiveRate(o).flatMap {
+                                           equipmentDewPointRow(o, plan, coil, cooler, thermo, passiveRate: $0) } },
+                                       target: { o in dewPointTarget(o) - (passiveRateD(o) ?? 0) },
+                                       width: equipmentColumns) {
+                        eD.append(r.x); rD.append(r.y)
+                    }
                 }
                 guard let bT = LeastSquares.fit(x: eT, y: rT, constraints: equipmentTemperatureConstraints),
                       let bD = LeastSquares.fit(x: eD, y: rD, constraints: equipmentDewPointConstraints)

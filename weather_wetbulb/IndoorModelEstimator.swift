@@ -109,6 +109,29 @@ nonisolated enum IndoorModelEstimator {
                         coil: structure.coil, cooler: structure.cooler,
                         exposure: structure.solarExposure, thermostat: structure.thermostat,
                         settleCapacity: false, now: now)
+            .map { onEverything($0, train: train, test: test, now: now) }
+    }
+
+    /// The same model with its coefficients fitted on the whole record.
+    ///
+    /// The split decides which structure to trust and produces the held-out
+    /// error, and then it has done its job. Forecasting from coefficients that
+    /// never saw the last quarter of the record — the most recent weather, the
+    /// most recent equipment habits — costs about seven per cent of twelve-hour
+    /// accuracy, measured over thirty half-day windows. The score kept is still
+    /// the honest one, from the model that had not seen the test rows.
+    static func onEverything(_ model: IndoorModel,
+                             train: [IndoorObservation],
+                             test: [IndoorObservation],
+                             now: Date = .now) -> IndoorModel {
+        guard !test.isEmpty,
+              var full = IndoorModel.fit(train: train + test, test: test, plan: model.plan,
+                                         coil: model.coil, cooler: model.cooler,
+                                         exposure: model.exposure, thermostat: model.thermostat,
+                                         settleCapacity: false, now: now)
+        else { return model }
+        full.score = model.score
+        return full
     }
 
     // MARK: - Forecast scoring
@@ -523,6 +546,9 @@ nonisolated enum IndoorModelEstimator {
                                                  thermostat: winner.model.thermostat,
                                                  settleCapacity: false, now: now)
                 ?? winner.forecastScore
+            // Everything above was about choosing; what ships is fitted on all
+            // of it.
+            winner.model = onEverything(winner.model, train: train, test: test, now: now)
             best = winner
         }
         return best

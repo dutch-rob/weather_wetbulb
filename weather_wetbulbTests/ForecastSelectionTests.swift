@@ -140,7 +140,7 @@ struct ForecastSelectionTests {
         else { #expect(Bool(false)); return }
         #expect(loaded == structure)
 
-        // And refitting the remembered structure reproduces the same model,
+        // And refitting the remembered structure reproduces the same structure,
         // which is what makes the quick path on opening trustworthy.
         guard let again = IndoorModelEstimator.fit(structure: loaded, train: train, test: test,
                                                    now: model.fittedAt)
@@ -148,6 +148,40 @@ struct ForecastSelectionTests {
         #expect(again.plan == model.plan)
         #expect(again.exposure == model.exposure)
         #expect(again.coil == model.coil)
-        #expect(again.temperature == model.temperature)
+
+        // Its coefficients are the whole record's, not the training part's:
+        // the split chose the structure and is then done.
+        guard let everything = IndoorModel.fit(train: train + test, test: test,
+                                               plan: loaded.plan, coil: loaded.coil,
+                                               cooler: loaded.cooler, exposure: loaded.solarExposure,
+                                               thermostat: loaded.thermostat, settleCapacity: false,
+                                               now: model.fittedAt)
+        else { #expect(Bool(false)); return }
+        #expect(again.temperature == everything.temperature)
+        #expect(again.dewPoint == everything.dewPoint)
+        // The score stays the honest one, measured on rows the coefficients
+        // behind it had never seen.
+        #expect(again.score.combined == model.score.combined)
+    }
+
+    @Test func aLongRowIsTheStretchAveraged() {
+        // One row per unbroken stretch, each regressor and the rate itself
+        // averaged over it — and weighted, so it counts for more than one row.
+        let start = Self.morning
+        let run = Self.run(count: 12, from: start)                  // four hours
+        let stretches = IndoorModel.stretches(run)
+        #expect(stretches.count == 1)
+        guard let row = IndoorModel.longRow(stretches[0],
+                                            row: { IndoorModel.passiveTemperatureRow($0, OutdoorSourcePlan(all: .station), .none) },
+                                            target: { IndoorModel.temperatureTarget($0) },
+                                            width: 4)
+        else { #expect(Bool(false)); return }
+        let w = IndoorModel.longRowWeight.squareRoot()
+        // Every row here is identical, so the average is that row, times the weight.
+        guard let one = IndoorModel.passiveTemperatureRow(run[0], OutdoorSourcePlan(all: .station), .none)
+        else { #expect(Bool(false)); return }
+        for i in 0..<4 { #expect(abs(row.x[i] - one[i] * w) < 1e-9) }
+        // Too short a stretch earns no long row at all.
+        #expect(IndoorModel.stretches(Self.run(count: 3, from: start)).isEmpty)
     }
 }

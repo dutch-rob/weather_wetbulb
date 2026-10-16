@@ -102,11 +102,24 @@ struct ContentView: View {
         return size.width > size.height ? .splitPane : .pager
     }
 
+    /// Debug only: `-UITestPose tabletop` forces the propped-open layout.
+    /// A simulator's hinge pose is set by hand in the Simulator app and
+    /// cannot be driven from simctl, so without this the pose cannot be
+    /// reached from a script at all.
+    private static let forcedTabletop: Bool = {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: "UITestPose") == "tabletop"
+        #else
+        return false
+        #endif
+    }()
+
     /// Propped open on a surface with the fold running across, so the half
     /// facing you is the top one. Only this pose: open flat, or held with the
     /// fold upright, and the usual layouts apply.
     private var isTabletopPose: Bool {
-        posture.isTabletop
+        if Self.forcedTabletop { return true }
+        return posture.isTabletop
             && metrics.size.height > metrics.size.width      // panels above and below
             && min(metrics.size.width, metrics.size.height) < Self.tabletMinShortSide
     }

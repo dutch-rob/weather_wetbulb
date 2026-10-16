@@ -67,6 +67,12 @@ struct HereTodayView: View {
 
     private var axisInk: Color { .primary }
 
+    /// The system clock-and-wifi corner, in global coordinates. Empty when
+    /// nothing is in the way. The graph spreads under it rather than stopping
+    /// short of it, and keeps its curve below it instead — see
+    /// `StatusCornerClearance`.
+    var statusCorner: CGRect = .zero
+
     /// Use the landscape arrangement even in a nominally regular height. Set
     /// when the device is propped open on a table and only its top half is in
     /// view: that half is wider than it is tall, whatever the size class says
@@ -81,6 +87,48 @@ struct HereTodayView: View {
     /// Hours between labelled ticks. Side by side each chart has half the
     /// width, and a label every two hours collapses into a row of ellipses.
     private var hourStride: Int { landscapeLayout ? 4 : 2 }
+
+    /// Roughly where a chart's plot sits inside the frame it is given: below
+    /// its legend, above its hour labels, right of its y-axis labels. The
+    /// legend is free to pass under the clock — it is short, and it hugs the
+    /// leading edge — so it is the plot, not the frame, that has to clear it.
+    private func plotRect(in frame: CGRect, height: CGFloat) -> CGRect {
+        CGRect(x: frame.minX + 36,
+               y: frame.minY + 20,
+               width: max(1, frame.width - 36),
+               height: max(1, height - 40))
+    }
+
+    /// Points to give back to the system strip when the ceiling could not be
+    /// raised far enough: the graph goes back to stopping short of it.
+    private func standOffWidth(_ corner: StatusCorner,
+                               ceiling: Double?,
+                               width: CGFloat) -> CGFloat {
+        guard !corner.isEmpty, ceiling == nil else { return 0 }
+        return width * CGFloat(corner.width)
+    }
+
+    /// Highest temperature plotted in the hours that pass under the corner.
+    private func peakUnder(_ corner: StatusCorner) -> Double? {
+        guard !corner.isEmpty, let domain = filledDateDomain else { return nil }
+        let start = domain.lowerBound.timeIntervalSinceReferenceDate
+        let end = domain.upperBound.timeIntervalSinceReferenceDate
+        guard end > start else { return nil }
+        let from = start + (end - start) * corner.startFraction
+        let to = start + (end - start) * corner.endFraction
+        var peak: Double?
+        for p in series {
+            let t = p.date.timeIntervalSinceReferenceDate
+            guard t >= from, t <= to else { continue }
+            var vals: [Double] = []
+            if graphTemp     { vals.append(useFahrenheit ? p.temperatureF : p.temperatureC) }
+            if graphWetBulb  { vals.append(useFahrenheit ? p.wetBulbF : p.wetBulbC) }
+            if graphDewPoint { vals.append(useFahrenheit ? p.dewPointF : p.dewPointC) }
+            if graphFeels    { vals.append(useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC) }
+            if let hi = vals.max() { peak = max(peak ?? -.infinity, hi) }
+        }
+        return peak
+    }
 
     private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
     private var windPanelVisible: Bool { graphPrecip || graphWind || graphGust }
@@ -244,14 +292,28 @@ struct HereTodayView: View {
                     // the attribution link, stack spacing) and split the rest.
                     let chrome: CGFloat = 16 + 16 + 18 + 16
                     let avail = max(200, h - chrome)
+                    let tempH = avail * 0.60
+                    // Only the top chart can reach the clock corner; the wind
+                    // chart is below it whatever the scale does.
+                    let corner = StatusCorner(
+                        status: statusCorner,
+                        chart: plotRect(in: geo.frame(in: .global).insetBy(dx: 16, dy: 0),
+                                        height: tempH))
+                    let ceiling = StatusCornerClearance.raisedCeiling(
+                        peak: peakUnder(corner), domain: tempYDomain, corner: corner)
                     VStack(spacing: 8) {
-                        if tempPanelVisible { temperatureChart(height: avail * 0.60) }
+                        if tempPanelVisible { temperatureChart(height: tempH, ceiling: ceiling) }
                         if windPanelVisible { precipWindChart(height: avail * 0.40) }
                         if let attribution {
                             WeatherAttributionLink(info: attribution)
                         }
                     }
                     .padding(.horizontal)
+                    // The corner could not be cleared on sensible terms, so
+                    // keep out of its strip after all — which is where the
+                    // graph stopped before any of this.
+                    .padding(corner.trailing ? .trailing : .leading,
+                             standOffWidth(corner, ceiling: ceiling, width: geo.size.width))
                     .frame(minHeight: h)
                 }
             }
@@ -259,10 +321,13 @@ struct HereTodayView: View {
     }
 
     @ViewBuilder
-    private func temperatureChart(height: CGFloat) -> some View {
+    /// `ceiling` replaces the top of the scale when the curve has to be kept
+    /// below the clock corner. The classic style draws thin lines on an
+    /// automatic scale and is left alone.
+    private func temperatureChart(height: CGFloat, ceiling: Double? = nil) -> some View {
         switch chartStyle {
         case .classic: classicTemperatureChart(height: height)
-        case .filled:  filledTemperatureChart(height: height)
+        case .filled:  filledTemperatureChart(height: height, ceiling: ceiling)
         }
     }
 
@@ -316,8 +381,9 @@ struct HereTodayView: View {
     // MARK: - Filled style
 
     @ViewBuilder
-    private func filledTemperatureChart(height: CGFloat) -> some View {
-        let dom = tempYDomain
+    private func filledTemperatureChart(height: CGFloat, ceiling: Double? = nil) -> some View {
+        let natural = tempYDomain
+        let dom = ceiling.map { natural.lowerBound...max($0, natural.upperBound) } ?? natural
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: filledTempLegend, ink: axisInk)

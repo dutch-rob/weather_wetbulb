@@ -63,11 +63,52 @@ struct TenDayView: View {
 
     private var axisInk: Color { .primary }
 
+    /// The system clock-and-wifi corner, in global coordinates — see the same
+    /// property on `HereTodayView`.
+    var statusCorner: CGRect = .zero
+
     /// Use the landscape arrangement even in a nominally regular height — see
     /// the note on the same property in `HereTodayView`.
     var forceLandscapeLayout: Bool = false
 
     private var landscapeLayout: Bool { verticalSizeClass == .compact || forceLandscapeLayout }
+
+    /// See the matching helpers in `HereTodayView`.
+    private func plotRect(in frame: CGRect, height: CGFloat) -> CGRect {
+        CGRect(x: frame.minX + 36,
+               y: frame.minY + 20,
+               width: max(1, frame.width - 36),
+               height: max(1, height - 40))
+    }
+
+    private func standOffWidth(_ corner: StatusCorner,
+                               ceiling: Double?,
+                               width: CGFloat) -> CGFloat {
+        guard !corner.isEmpty, ceiling == nil else { return 0 }
+        return width * CGFloat(corner.width)
+    }
+
+    /// Highest temperature plotted in the days that pass under the corner.
+    private func peakUnder(_ corner: StatusCorner) -> Double? {
+        guard !corner.isEmpty, let domain = dateDomain else { return nil }
+        let start = domain.lowerBound.timeIntervalSinceReferenceDate
+        let end = domain.upperBound.timeIntervalSinceReferenceDate
+        guard end > start else { return nil }
+        let from = start + (end - start) * corner.startFraction
+        let to = start + (end - start) * corner.endFraction
+        var peak: Double?
+        for p in series {
+            let t = p.date.timeIntervalSinceReferenceDate
+            guard t >= from, t <= to else { continue }
+            var vals: [Double] = []
+            if graphTemp     { vals.append(useFahrenheit ? p.temperatureF : p.temperatureC) }
+            if graphWetBulb  { vals.append(useFahrenheit ? p.wetBulbF : p.wetBulbC) }
+            if graphDewPoint { vals.append(useFahrenheit ? p.dewPointF : p.dewPointC) }
+            if graphFeels    { vals.append(useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC) }
+            if let hi = vals.max() { peak = max(peak ?? -.infinity, hi) }
+        }
+        return peak
+    }
 
     private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
     private var windPanelVisible: Bool { graphPrecip || graphWind || graphGust }
@@ -247,14 +288,23 @@ struct TenDayView: View {
                     // the attribution link, stack spacing) and split the rest.
                     let chrome: CGFloat = 16 + 16 + 18 + 16
                     let avail = max(200, h - chrome)
+                    let tempH = avail * 0.60
+                    let corner = StatusCorner(
+                        status: statusCorner,
+                        chart: plotRect(in: geo.frame(in: .global).insetBy(dx: 16, dy: 0),
+                                        height: tempH))
+                    let ceiling = StatusCornerClearance.raisedCeiling(
+                        peak: peakUnder(corner), domain: tempYDomain, corner: corner)
                     VStack(spacing: 8) {
-                        if tempPanelVisible { temperatureChart(height: avail * 0.60, width: w) }
+                        if tempPanelVisible { temperatureChart(height: tempH, width: w, ceiling: ceiling) }
                         if windPanelVisible { precipWindChart(height: avail * 0.40, width: w) }
                         if let attribution {
                             WeatherAttributionLink(info: attribution)
                         }
                     }
                     .padding(.horizontal)
+                    .padding(corner.trailing ? .trailing : .leading,
+                             standOffWidth(corner, ceiling: ceiling, width: w))
                     .frame(minHeight: h)
                 }
             }
@@ -262,10 +312,12 @@ struct TenDayView: View {
     }
 
     @ViewBuilder
-    private func temperatureChart(height: CGFloat, width: CGFloat) -> some View {
+    /// `ceiling` replaces the top of the scale to keep the curve below the
+    /// clock corner — see `HereTodayView`.
+    private func temperatureChart(height: CGFloat, width: CGFloat, ceiling: Double? = nil) -> some View {
         switch chartStyle {
         case .classic: classicTemperatureChart(height: height, width: width)
-        case .filled:  filledTemperatureChart(height: height, width: width)
+        case .filled:  filledTemperatureChart(height: height, width: width, ceiling: ceiling)
         }
     }
 
@@ -318,8 +370,9 @@ struct TenDayView: View {
     // MARK: - Filled style
 
     @ViewBuilder
-    private func filledTemperatureChart(height: CGFloat, width: CGFloat) -> some View {
-        let dom = tempYDomain
+    private func filledTemperatureChart(height: CGFloat, width: CGFloat, ceiling: Double? = nil) -> some View {
+        let natural = tempYDomain
+        let dom = ceiling.map { natural.lowerBound...max($0, natural.upperBound) } ?? natural
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: filledTempLegend, ink: axisInk)

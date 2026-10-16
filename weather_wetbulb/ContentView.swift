@@ -147,6 +147,13 @@ struct ContentView: View {
         (max(0, metrics.safeInsets.left), max(0, metrics.safeInsets.right))
     }
 
+    /// How far the graphs may spread into the side strips the system reserves,
+    /// when there is one screen rather than two. Split in two, the right pane
+    /// already takes the trailing strip and this would double it.
+    private var graphBleed: (leading: CGFloat, trailing: CGFloat) {
+        layoutMode == .pager ? graphInsetBonus : (0, 0)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Line 1: place name (taps open the places sheet) with a refresh
@@ -570,8 +577,14 @@ struct ContentView: View {
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
                 // Propped open, the visible half is wider than it is tall
                 // whatever the size class reports for the panel as a whole.
+                statusCorner: metrics.statusFrame,
                 forceLandscapeLayout: isTabletopPose
             )
+            // Out to the panel edges, under the clock and past the camera.
+            // Only the graph goes there: the header and the button bar stay
+            // inside the safe area, where nothing is carved out of them.
+            .padding(.leading, -graphBleed.leading)
+            .padding(.trailing, -graphBleed.trailing)
         }
     }
 
@@ -591,8 +604,14 @@ struct ContentView: View {
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
                 // Propped open, the visible half is wider than it is tall
                 // whatever the size class reports for the panel as a whole.
+                statusCorner: metrics.statusFrame,
                 forceLandscapeLayout: isTabletopPose
             )
+            // Out to the panel edges, under the clock and past the camera.
+            // Only the graph goes there: the header and the button bar stay
+            // inside the safe area, where nothing is carved out of them.
+            .padding(.leading, -graphBleed.leading)
+            .padding(.trailing, -graphBleed.trailing)
         }
     }
 

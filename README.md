@@ -61,6 +61,20 @@ The cog wheel at the bottom right opens Settings, where you can adjust:
 ## Zoom graph
 Instead of paging between a 24-hour screen and a 10-day screen, the zoom graph puts both on one screen. Swipe left or right to scroll through time, and pinch to zoom: from a single day out to ten days, stopping at any zoom level in between. The heading tells you how wide the window is and where it starts. A button at the top switches to the table — there is no up/down swipe here, since pinching does the zooming — and the scrubber works here too.
 
+## On a folding phone
+Opened out, the screen is laid out around the crease: the table takes the left
+half and the graph the right, with the divider landing on the fold itself, so
+opening the phone reads as the second half turning transparent rather than as
+the screen rearranging itself. The table is simply there beside the graph, so
+the buttons that would switch to it are left off. Held the other way up, with
+the fold running across rather than down, the graph keeps the whole screen — a
+left-and-right split would sit astride the crease.
+
+Fold it part way and stand it on a table, and everything moves into the half
+tilted towards you, buttons included, leaving the half lying flat to the sky.
+
+Folded shut, the outer screen works like any other phone.
+
 ## Apple Watch
 WetBulbCast includes an Apple Watch app that fetches its own forecast, so it works without your phone nearby. Swipe between a table, a 24-hour screen and a 10-day screen. It follows the units and chart style you picked on the phone, and your places are sent across from the phone.
 

@@ -48,6 +48,7 @@ struct TenDayView: View {
 
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit: Bool = true
     @AppStorage(SettingsKey.use12HourClock) private var use12Hour = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage(SettingsKey.chartStyle) private var chartStyle: ChartStyle = .filled
     @AppStorage(SettingsKey.graphPalette) private var palette: GraphPalette = .vivid
     @AppStorage(GraphKey.temp)     private var graphTemp     = true
@@ -61,6 +62,53 @@ struct TenDayView: View {
     @State private var scrubDate: Date? = nil
 
     private var axisInk: Color { .primary }
+
+    /// The system clock-and-wifi corner, in global coordinates — see the same
+    /// property on `HereTodayView`.
+    var statusCorner: CGRect = .zero
+
+    /// Use the landscape arrangement even in a nominally regular height — see
+    /// the note on the same property in `HereTodayView`.
+    var forceLandscapeLayout: Bool = false
+
+    private var landscapeLayout: Bool { verticalSizeClass == .compact || forceLandscapeLayout }
+
+    /// See the matching helpers in `HereTodayView`.
+    private func plotRect(in frame: CGRect, height: CGFloat) -> CGRect {
+        CGRect(x: frame.minX + 36,
+               y: frame.minY + 20,
+               width: max(1, frame.width - 36),
+               height: max(1, height - 40))
+    }
+
+    private func standOffWidth(_ corner: StatusCorner,
+                               ceiling: Double?,
+                               width: CGFloat) -> CGFloat {
+        guard !corner.isEmpty, ceiling == nil else { return 0 }
+        return width * CGFloat(corner.width)
+    }
+
+    /// Highest temperature plotted in the days that pass under the corner.
+    private func peakUnder(_ corner: StatusCorner) -> Double? {
+        guard !corner.isEmpty, let domain = dateDomain else { return nil }
+        let start = domain.lowerBound.timeIntervalSinceReferenceDate
+        let end = domain.upperBound.timeIntervalSinceReferenceDate
+        guard end > start else { return nil }
+        let from = start + (end - start) * corner.startFraction
+        let to = start + (end - start) * corner.endFraction
+        var peak: Double?
+        for p in series {
+            let t = p.date.timeIntervalSinceReferenceDate
+            guard t >= from, t <= to else { continue }
+            var vals: [Double] = []
+            if graphTemp     { vals.append(useFahrenheit ? p.temperatureF : p.temperatureC) }
+            if graphWetBulb  { vals.append(useFahrenheit ? p.wetBulbF : p.wetBulbC) }
+            if graphDewPoint { vals.append(useFahrenheit ? p.dewPointF : p.dewPointC) }
+            if graphFeels    { vals.append(useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC) }
+            if let hi = vals.max() { peak = max(peak ?? -.infinity, hi) }
+        }
+        return peak
+    }
 
     private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
     private var windPanelVisible: Bool { graphPrecip || graphWind || graphGust }
@@ -215,19 +263,48 @@ struct TenDayView: View {
                     ForecastLoadingView(progress: progress, nowTick: nowTick, errorMessage: errorMessage)
                         .padding()
                         .frame(minHeight: h)
+                } else if landscapeLayout {
+                    // Side by side, each chart the full height — see the same
+                    // branch in `HereTodayView`. Half the width each, so the
+                    // day labels get the narrow spelling.
+                    let chrome: CGFloat = 18 + 6
+                    let chartH = max(120, h - chrome)
+                    let chartW = w / 2
+                    VStack(spacing: 4) {
+                        HStack(spacing: 12) {
+                            if tempPanelVisible { temperatureChart(height: chartH, width: chartW) }
+                            if windPanelVisible {
+                                precipWindChart(height: chartH, width: chartW, standalone: true)
+                            }
+                        }
+                        if let attribution {
+                            WeatherAttributionLink(info: attribution)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .frame(minHeight: h)
                 } else {
                     // Fill the screen: take off the fixed chrome (two legends,
                     // the attribution link, stack spacing) and split the rest.
                     let chrome: CGFloat = 16 + 16 + 18 + 16
                     let avail = max(200, h - chrome)
+                    let tempH = avail * 0.60
+                    let corner = StatusCorner(
+                        status: statusCorner,
+                        chart: plotRect(in: geo.frame(in: .global).insetBy(dx: 16, dy: 0),
+                                        height: tempH))
+                    let ceiling = StatusCornerClearance.raisedCeiling(
+                        peak: peakUnder(corner), domain: tempYDomain, corner: corner)
                     VStack(spacing: 8) {
-                        if tempPanelVisible { temperatureChart(height: avail * 0.60, width: w) }
+                        if tempPanelVisible { temperatureChart(height: tempH, width: w, ceiling: ceiling) }
                         if windPanelVisible { precipWindChart(height: avail * 0.40, width: w) }
                         if let attribution {
                             WeatherAttributionLink(info: attribution)
                         }
                     }
                     .padding(.horizontal)
+                    .padding(corner.trailing ? .trailing : .leading,
+                             standOffWidth(corner, ceiling: ceiling, width: w))
                     .frame(minHeight: h)
                 }
             }
@@ -235,18 +312,22 @@ struct TenDayView: View {
     }
 
     @ViewBuilder
-    private func temperatureChart(height: CGFloat, width: CGFloat) -> some View {
+    /// `ceiling` replaces the top of the scale to keep the curve below the
+    /// clock corner — see `HereTodayView`.
+    private func temperatureChart(height: CGFloat, width: CGFloat, ceiling: Double? = nil) -> some View {
         switch chartStyle {
         case .classic: classicTemperatureChart(height: height, width: width)
-        case .filled:  filledTemperatureChart(height: height, width: width)
+        case .filled:  filledTemperatureChart(height: height, width: width, ceiling: ceiling)
         }
     }
 
     @ViewBuilder
-    private func precipWindChart(height: CGFloat, width: CGFloat) -> some View {
+    /// `standalone`: beside the temperature chart rather than under it, so it
+    /// stands upright and labels its own axis. See `HereTodayView`.
+    private func precipWindChart(height: CGFloat, width: CGFloat, standalone: Bool = false) -> some View {
         switch chartStyle {
         case .classic: classicPrecipWindChart(height: height, width: width)
-        case .filled:  filledPrecipWindChart(height: height, width: width)
+        case .filled:  filledPrecipWindChart(height: height, width: width, standalone: standalone)
         }
     }
 
@@ -289,8 +370,9 @@ struct TenDayView: View {
     // MARK: - Filled style
 
     @ViewBuilder
-    private func filledTemperatureChart(height: CGFloat, width: CGFloat) -> some View {
-        let dom = tempYDomain
+    private func filledTemperatureChart(height: CGFloat, width: CGFloat, ceiling: Double? = nil) -> some View {
+        let natural = tempYDomain
+        let dom = ceiling.map { natural.lowerBound...max($0, natural.upperBound) } ?? natural
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: filledTempLegend, ink: axisInk)
@@ -389,10 +471,14 @@ struct TenDayView: View {
     }
 
     @ViewBuilder
-    private func filledPrecipWindChart(height: CGFloat, width: CGFloat) -> some View {
+    private func filledPrecipWindChart(height: CGFloat, width: CGFloat, standalone: Bool = false) -> some View {
         let dom = windYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
+            if standalone {
+                ChartLegendRow(entries: filledWindLegend, ink: axisInk)
+                    .padding(.leading, 36)
+            }
             Chart {
                 ForEach(series) { p in
                 let gust = useFahrenheit ? p.windGustMPH : p.windGustKPH
@@ -443,7 +529,10 @@ struct TenDayView: View {
                 }
             }
             .chartLegend(.hidden)
-            .chartYScale(domain: [dom.upperBound, dom.lowerBound])
+            // Upright when it stands beside the temperature chart; hanging
+            // from zero when it sits under it and shares those day labels.
+            .chartYScale(domain: standalone ? [dom.lowerBound, dom.upperBound]
+                                            : [dom.upperBound, dom.lowerBound])
             .chartYAxis {
                 AxisMarks(position: .leading, values: .stride(by: 10)) { _ in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
@@ -452,9 +541,15 @@ struct TenDayView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day, count: 1)) { _ in
+                AxisMarks(values: .stride(by: .day, count: 1)) { value in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
                     AxisTick().foregroundStyle(axisInk.opacity(0.6))
+                    if standalone {
+                        AxisValueLabel {
+                            Text(value.as(Date.self).map { dayLabel(for: $0, width: width) } ?? "")
+                                .font(.caption).foregroundStyle(axisInk)
+                        }
+                    }
                 }
             }
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
@@ -462,8 +557,10 @@ struct TenDayView: View {
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
 
-            ChartLegendRow(entries: filledWindLegend, ink: axisInk)
-                .padding(.leading, 36)
+            if !standalone {
+                ChartLegendRow(entries: filledWindLegend, ink: axisInk)
+                    .padding(.leading, 36)
+            }
         }
     }
 

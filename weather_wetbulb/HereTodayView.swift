@@ -51,6 +51,7 @@ struct HereTodayView: View {
 
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit: Bool = true
     @AppStorage(SettingsKey.use12HourClock) private var use12Hour = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage(SettingsKey.chartStyle) private var chartStyle: ChartStyle = .filled
     @AppStorage(SettingsKey.graphPalette) private var palette: GraphPalette = .vivid
     @AppStorage(GraphKey.temp)     private var graphTemp     = true
@@ -65,6 +66,69 @@ struct HereTodayView: View {
     @State private var scrubDate: Date? = nil
 
     private var axisInk: Color { .primary }
+
+    /// The system clock-and-wifi corner, in global coordinates. Empty when
+    /// nothing is in the way. The graph spreads under it rather than stopping
+    /// short of it, and keeps its curve below it instead — see
+    /// `StatusCornerClearance`.
+    var statusCorner: CGRect = .zero
+
+    /// Use the landscape arrangement even in a nominally regular height. Set
+    /// when the device is propped open on a table and only its top half is in
+    /// view: that half is wider than it is tall, whatever the size class says
+    /// about the panel as a whole.
+    var forceLandscapeLayout: Bool = false
+
+    /// Side by side rather than stacked. Stacked in a short panel the two
+    /// charts get a strip each and neither can be read; side by side they each
+    /// keep the full height and give up width, which they have to spare.
+    private var landscapeLayout: Bool { verticalSizeClass == .compact || forceLandscapeLayout }
+
+    /// Hours between labelled ticks. Side by side each chart has half the
+    /// width, and a label every two hours collapses into a row of ellipses.
+    private var hourStride: Int { landscapeLayout ? 4 : 2 }
+
+    /// Roughly where a chart's plot sits inside the frame it is given: below
+    /// its legend, above its hour labels, right of its y-axis labels. The
+    /// legend is free to pass under the clock — it is short, and it hugs the
+    /// leading edge — so it is the plot, not the frame, that has to clear it.
+    private func plotRect(in frame: CGRect, height: CGFloat) -> CGRect {
+        CGRect(x: frame.minX + 36,
+               y: frame.minY + 20,
+               width: max(1, frame.width - 36),
+               height: max(1, height - 40))
+    }
+
+    /// Points to give back to the system strip when the ceiling could not be
+    /// raised far enough: the graph goes back to stopping short of it.
+    private func standOffWidth(_ corner: StatusCorner,
+                               ceiling: Double?,
+                               width: CGFloat) -> CGFloat {
+        guard !corner.isEmpty, ceiling == nil else { return 0 }
+        return width * CGFloat(corner.width)
+    }
+
+    /// Highest temperature plotted in the hours that pass under the corner.
+    private func peakUnder(_ corner: StatusCorner) -> Double? {
+        guard !corner.isEmpty, let domain = filledDateDomain else { return nil }
+        let start = domain.lowerBound.timeIntervalSinceReferenceDate
+        let end = domain.upperBound.timeIntervalSinceReferenceDate
+        guard end > start else { return nil }
+        let from = start + (end - start) * corner.startFraction
+        let to = start + (end - start) * corner.endFraction
+        var peak: Double?
+        for p in series {
+            let t = p.date.timeIntervalSinceReferenceDate
+            guard t >= from, t <= to else { continue }
+            var vals: [Double] = []
+            if graphTemp     { vals.append(useFahrenheit ? p.temperatureF : p.temperatureC) }
+            if graphWetBulb  { vals.append(useFahrenheit ? p.wetBulbF : p.wetBulbC) }
+            if graphDewPoint { vals.append(useFahrenheit ? p.dewPointF : p.dewPointC) }
+            if graphFeels    { vals.append(useFahrenheit ? p.apparentTemperatureF : p.apparentTemperatureC) }
+            if let hi = vals.max() { peak = max(peak ?? -.infinity, hi) }
+        }
+        return peak
+    }
 
     private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
     private var windPanelVisible: Bool { graphPrecip || graphWind || graphGust }
@@ -204,19 +268,52 @@ struct HereTodayView: View {
                     ForecastLoadingView(progress: progress, nowTick: nowTick, errorMessage: errorMessage)
                         .padding()
                         .frame(minHeight: h)
+                } else if landscapeLayout {
+                    // Side by side, each chart the full height of the panel.
+                    // The wind chart is stood the right way up here: hanging
+                    // from zero only makes sense directly under the
+                    // temperature chart, where the two share one set of hour
+                    // labels. On its own it needs its own axis at its foot.
+                    let chrome: CGFloat = 18 + 6
+                    let chartH = max(120, h - chrome)
+                    VStack(spacing: 4) {
+                        HStack(spacing: 12) {
+                            if tempPanelVisible { temperatureChart(height: chartH) }
+                            if windPanelVisible { precipWindChart(height: chartH, standalone: true) }
+                        }
+                        if let attribution {
+                            WeatherAttributionLink(info: attribution)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .frame(minHeight: h)
                 } else {
                     // Fill the screen: take off the fixed chrome (two legends,
                     // the attribution link, stack spacing) and split the rest.
                     let chrome: CGFloat = 16 + 16 + 18 + 16
                     let avail = max(200, h - chrome)
+                    let tempH = avail * 0.60
+                    // Only the top chart can reach the clock corner; the wind
+                    // chart is below it whatever the scale does.
+                    let corner = StatusCorner(
+                        status: statusCorner,
+                        chart: plotRect(in: geo.frame(in: .global).insetBy(dx: 16, dy: 0),
+                                        height: tempH))
+                    let ceiling = StatusCornerClearance.raisedCeiling(
+                        peak: peakUnder(corner), domain: tempYDomain, corner: corner)
                     VStack(spacing: 8) {
-                        if tempPanelVisible { temperatureChart(height: avail * 0.60) }
+                        if tempPanelVisible { temperatureChart(height: tempH, ceiling: ceiling) }
                         if windPanelVisible { precipWindChart(height: avail * 0.40) }
                         if let attribution {
                             WeatherAttributionLink(info: attribution)
                         }
                     }
                     .padding(.horizontal)
+                    // The corner could not be cleared on sensible terms, so
+                    // keep out of its strip after all — which is where the
+                    // graph stopped before any of this.
+                    .padding(corner.trailing ? .trailing : .leading,
+                             standOffWidth(corner, ceiling: ceiling, width: geo.size.width))
                     .frame(minHeight: h)
                 }
             }
@@ -224,18 +321,24 @@ struct HereTodayView: View {
     }
 
     @ViewBuilder
-    private func temperatureChart(height: CGFloat) -> some View {
+    /// `ceiling` replaces the top of the scale when the curve has to be kept
+    /// below the clock corner. The classic style draws thin lines on an
+    /// automatic scale and is left alone.
+    private func temperatureChart(height: CGFloat, ceiling: Double? = nil) -> some View {
         switch chartStyle {
         case .classic: classicTemperatureChart(height: height)
-        case .filled:  filledTemperatureChart(height: height)
+        case .filled:  filledTemperatureChart(height: height, ceiling: ceiling)
         }
     }
 
     @ViewBuilder
-    private func precipWindChart(height: CGFloat) -> some View {
+    /// `standalone` is for the landscape layout, where this chart sits beside
+    /// the temperature chart rather than under it: it stands upright and
+    /// labels its own time axis. The classic style already does both.
+    private func precipWindChart(height: CGFloat, standalone: Bool = false) -> some View {
         switch chartStyle {
         case .classic: classicPrecipWindChart(height: height)
-        case .filled:  filledPrecipWindChart(height: height)
+        case .filled:  filledPrecipWindChart(height: height, standalone: standalone)
         }
     }
 
@@ -278,8 +381,9 @@ struct HereTodayView: View {
     // MARK: - Filled style
 
     @ViewBuilder
-    private func filledTemperatureChart(height: CGFloat) -> some View {
-        let dom = tempYDomain
+    private func filledTemperatureChart(height: CGFloat, ceiling: Double? = nil) -> some View {
+        let natural = tempYDomain
+        let dom = ceiling.map { natural.lowerBound...max($0, natural.upperBound) } ?? natural
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
             ChartLegendRow(entries: filledTempLegend, ink: axisInk)
@@ -353,7 +457,7 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
                     AxisTick().foregroundStyle(axisInk.opacity(0.6))
                     AxisValueLabel(centered: true) {
@@ -381,10 +485,17 @@ struct HereTodayView: View {
     }
 
     @ViewBuilder
-    private func filledPrecipWindChart(height: CGFloat) -> some View {
+    private func filledPrecipWindChart(height: CGFloat, standalone: Bool = false) -> some View {
         let dom = windYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
+            // Standing on its own the legend belongs above, where every other
+            // chart in the app keeps it. Hanging under the temperature chart it
+            // goes below, so it does not separate the two plots.
+            if standalone {
+                ChartLegendRow(entries: filledWindLegend, ink: axisInk)
+                    .padding(.leading, 36)
+            }
             Chart {
                 ForEach(series) { p in
                     let gust = useFahrenheit ? p.windGustMPH : p.windGustKPH
@@ -439,7 +550,10 @@ struct HereTodayView: View {
             .chartLegend(.hidden)
             // Flipped: zero at the top, so the wind/rain areas hang downward and
             // this chart shares the hour labels of the temperature chart above.
-            .chartYScale(domain: [dom.upperBound, dom.lowerBound])
+            // Beside that chart instead of under it, there is nothing to hang
+            // from and nothing to share, so it stands up the usual way.
+            .chartYScale(domain: standalone ? [dom.lowerBound, dom.upperBound]
+                                            : [dom.upperBound, dom.lowerBound])
             .chartYAxis {
                 AxisMarks(position: .leading, values: .stride(by: 10)) { _ in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
@@ -448,10 +562,17 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                // Grid lines only — hour labels are shared with the chart above.
-                AxisMarks(values: .stride(by: .hour, count: 2)) { _ in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
                     AxisTick().foregroundStyle(axisInk.opacity(0.6))
+                    // Grid lines only when the hour labels are shared with the
+                    // chart above; its own axis when it stands beside one.
+                    if standalone {
+                        AxisValueLabel(centered: true) {
+                            Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
+                                .font(.caption).foregroundStyle(axisInk)
+                        }
+                    }
                 }
             }
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
@@ -459,8 +580,10 @@ struct HereTodayView: View {
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
 
-            ChartLegendRow(entries: filledWindLegend, ink: axisInk)
-                .padding(.leading, 36)
+            if !standalone {
+                ChartLegendRow(entries: filledWindLegend, ink: axisInk)
+                    .padding(.leading, 36)
+            }
         }
     }
 
@@ -508,7 +631,7 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine(); AxisTick()
                     AxisValueLabel(centered: true) {
                         Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
@@ -561,7 +684,7 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine(); AxisTick()
                     AxisValueLabel(centered: true) {
                         Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")

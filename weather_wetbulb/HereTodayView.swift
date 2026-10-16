@@ -51,6 +51,7 @@ struct HereTodayView: View {
 
     @AppStorage(SettingsKey.useFahrenheit) private var useFahrenheit: Bool = true
     @AppStorage(SettingsKey.use12HourClock) private var use12Hour = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage(SettingsKey.chartStyle) private var chartStyle: ChartStyle = .filled
     @AppStorage(SettingsKey.graphPalette) private var palette: GraphPalette = .vivid
     @AppStorage(GraphKey.temp)     private var graphTemp     = true
@@ -65,6 +66,21 @@ struct HereTodayView: View {
     @State private var scrubDate: Date? = nil
 
     private var axisInk: Color { .primary }
+
+    /// Use the landscape arrangement even in a nominally regular height. Set
+    /// when the device is propped open on a table and only its top half is in
+    /// view: that half is wider than it is tall, whatever the size class says
+    /// about the panel as a whole.
+    var forceLandscapeLayout: Bool = false
+
+    /// Side by side rather than stacked. Stacked in a short panel the two
+    /// charts get a strip each and neither can be read; side by side they each
+    /// keep the full height and give up width, which they have to spare.
+    private var landscapeLayout: Bool { verticalSizeClass == .compact || forceLandscapeLayout }
+
+    /// Hours between labelled ticks. Side by side each chart has half the
+    /// width, and a label every two hours collapses into a row of ellipses.
+    private var hourStride: Int { landscapeLayout ? 4 : 2 }
 
     private var tempPanelVisible: Bool { graphTemp || graphWetBulb || graphDewPoint || graphFeels }
     private var windPanelVisible: Bool { graphPrecip || graphWind || graphGust }
@@ -204,6 +220,25 @@ struct HereTodayView: View {
                     ForecastLoadingView(progress: progress, nowTick: nowTick, errorMessage: errorMessage)
                         .padding()
                         .frame(minHeight: h)
+                } else if landscapeLayout {
+                    // Side by side, each chart the full height of the panel.
+                    // The wind chart is stood the right way up here: hanging
+                    // from zero only makes sense directly under the
+                    // temperature chart, where the two share one set of hour
+                    // labels. On its own it needs its own axis at its foot.
+                    let chrome: CGFloat = 18 + 6
+                    let chartH = max(120, h - chrome)
+                    VStack(spacing: 4) {
+                        HStack(spacing: 12) {
+                            if tempPanelVisible { temperatureChart(height: chartH) }
+                            if windPanelVisible { precipWindChart(height: chartH, standalone: true) }
+                        }
+                        if let attribution {
+                            WeatherAttributionLink(info: attribution)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .frame(minHeight: h)
                 } else {
                     // Fill the screen: take off the fixed chrome (two legends,
                     // the attribution link, stack spacing) and split the rest.
@@ -232,10 +267,13 @@ struct HereTodayView: View {
     }
 
     @ViewBuilder
-    private func precipWindChart(height: CGFloat) -> some View {
+    /// `standalone` is for the landscape layout, where this chart sits beside
+    /// the temperature chart rather than under it: it stands upright and
+    /// labels its own time axis. The classic style already does both.
+    private func precipWindChart(height: CGFloat, standalone: Bool = false) -> some View {
         switch chartStyle {
         case .classic: classicPrecipWindChart(height: height)
-        case .filled:  filledPrecipWindChart(height: height)
+        case .filled:  filledPrecipWindChart(height: height, standalone: standalone)
         }
     }
 
@@ -353,7 +391,7 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
                     AxisTick().foregroundStyle(axisInk.opacity(0.6))
                     AxisValueLabel(centered: true) {
@@ -381,10 +419,17 @@ struct HereTodayView: View {
     }
 
     @ViewBuilder
-    private func filledPrecipWindChart(height: CGFloat) -> some View {
+    private func filledPrecipWindChart(height: CGFloat, standalone: Bool = false) -> some View {
         let dom = windYDomain
         let base = dom.lowerBound
         VStack(alignment: .leading, spacing: 2) {
+            // Standing on its own the legend belongs above, where every other
+            // chart in the app keeps it. Hanging under the temperature chart it
+            // goes below, so it does not separate the two plots.
+            if standalone {
+                ChartLegendRow(entries: filledWindLegend, ink: axisInk)
+                    .padding(.leading, 36)
+            }
             Chart {
                 ForEach(series) { p in
                     let gust = useFahrenheit ? p.windGustMPH : p.windGustKPH
@@ -439,7 +484,10 @@ struct HereTodayView: View {
             .chartLegend(.hidden)
             // Flipped: zero at the top, so the wind/rain areas hang downward and
             // this chart shares the hour labels of the temperature chart above.
-            .chartYScale(domain: [dom.upperBound, dom.lowerBound])
+            // Beside that chart instead of under it, there is nothing to hang
+            // from and nothing to share, so it stands up the usual way.
+            .chartYScale(domain: standalone ? [dom.lowerBound, dom.upperBound]
+                                            : [dom.upperBound, dom.lowerBound])
             .chartYAxis {
                 AxisMarks(position: .leading, values: .stride(by: 10)) { _ in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
@@ -448,10 +496,17 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                // Grid lines only — hour labels are shared with the chart above.
-                AxisMarks(values: .stride(by: .hour, count: 2)) { _ in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine().foregroundStyle(axisInk.opacity(0.25))
                     AxisTick().foregroundStyle(axisInk.opacity(0.6))
+                    // Grid lines only when the hour labels are shared with the
+                    // chart above; its own axis when it stands beside one.
+                    if standalone {
+                        AxisValueLabel(centered: true) {
+                            Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
+                                .font(.caption).foregroundStyle(axisInk)
+                        }
+                    }
                 }
             }
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
@@ -459,8 +514,10 @@ struct HereTodayView: View {
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .frame(height: height - 20)
 
-            ChartLegendRow(entries: filledWindLegend, ink: axisInk)
-                .padding(.leading, 36)
+            if !standalone {
+                ChartLegendRow(entries: filledWindLegend, ink: axisInk)
+                    .padding(.leading, 36)
+            }
         }
     }
 
@@ -508,7 +565,7 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine(); AxisTick()
                     AxisValueLabel(centered: true) {
                         Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")
@@ -561,7 +618,7 @@ struct HereTodayView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 2)) { value in
+                AxisMarks(values: .stride(by: .hour, count: hourStride)) { value in
                     AxisGridLine(); AxisTick()
                     AxisValueLabel(centered: true) {
                         Text(value.as(Date.self).map { hourLabel(for: $0) } ?? "")

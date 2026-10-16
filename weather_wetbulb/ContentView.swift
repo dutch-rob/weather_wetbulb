@@ -567,7 +567,10 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
+                // Propped open, the visible half is wider than it is tall
+                // whatever the size class reports for the panel as a whole.
+                forceLandscapeLayout: isTabletopPose
             )
         }
     }
@@ -585,7 +588,10 @@ struct ContentView: View {
                 nowTick: nowTick,
                 errorMessage: weather.lastErrorMessage,
                 attribution: weather.attribution,
-                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) }
+                onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
+                // Propped open, the visible half is wider than it is tall
+                // whatever the size class reports for the panel as a whole.
+                forceLandscapeLayout: isTabletopPose
             )
         }
     }

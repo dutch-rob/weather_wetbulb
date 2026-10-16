@@ -25,6 +25,11 @@ struct InfoView: View {
                 }
 
                 Group {
+                    Text("Turning the phone sideways").font(.headline)
+                    Text("Sideways there is no height to share, so the two graphs stand side by side instead of one above the other — temperature on the left, wind and rain on the right — and each keeps the full height of the screen. Under the temperature graph the wind graph hangs down from zero, because the two share one set of hour labels; standing on its own it is the right way up with its own hours along the foot.")
+                }
+
+                Group {
                     Text("Reading exact values").font(.headline)
                     Text("Press and hold a graph to drop a \"scrubber\": a dashed line at that moment in time, with a card listing the exact values for that hour — temperature and feels like, wet bulb, dew point, wind and gusts, and precipitation. Keep holding and drag left or right to move through the forecast. Tap anywhere on the graph, or the X on the card, to put it away again.")
                 }

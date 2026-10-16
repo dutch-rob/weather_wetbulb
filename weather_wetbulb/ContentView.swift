@@ -147,6 +147,32 @@ struct ContentView: View {
         (max(0, metrics.safeInsets.left), max(0, metrics.safeInsets.right))
     }
 
+    /// Whether the place-name row can be lifted into the band the system keeps
+    /// for the clock, which buys the graph that row's height.
+    ///
+    /// Only where that band has a clear stretch wide enough to hold a row. An
+    /// ordinary phone reports a status bar the full width of the screen, so
+    /// there is no clear stretch and nothing is lifted; the folded and
+    /// unfolded screens here report a corner, and the rest of the band is
+    /// empty.
+    private var liftHeaderIntoStatusBand: Bool {
+        let band = metrics.statusFrame
+        guard band.height >= 30, band.width > 0, metrics.size.width > 0 else { return false }
+        let free = metrics.statusAtTopTrailing
+            ? band.minX
+            : metrics.size.width - band.maxX
+        return free >= 180
+    }
+
+    /// Keeps the lifted row off the clock itself.
+    private var liftedHeaderPadding: (leading: CGFloat, trailing: CGFloat) {
+        guard liftHeaderIntoStatusBand else { return (0, 0) }
+        let band = metrics.statusFrame
+        return metrics.statusAtTopTrailing
+            ? (0, max(0, metrics.size.width - band.minX))
+            : (max(0, band.maxX), 0)
+    }
+
     /// How far the graphs may spread into the side strips the system reserves,
     /// when there is one screen rather than two. Split in two, the right pane
     /// already takes the trailing strip and this would double it.
@@ -185,12 +211,20 @@ struct ContentView: View {
                     .accessibilityLabel("Refresh forecast")
                 }
             }
-            .background(.bar)
+            // Lifted into the clock's band, this row has to keep off the clock
+            // itself; left where it is, it spans the width as before.
+            .padding(.leading, liftedHeaderPadding.leading)
+            .padding(.trailing, liftedHeaderPadding.trailing)
+            .background(liftHeaderIntoStatusBand ? AnyShapeStyle(.clear) : AnyShapeStyle(.bar))
 
-            Divider()
+            if !liftHeaderIntoStatusBand { Divider() }
 
             if layoutMode == .splitPane { splitPaneLayout } else { phoneContentPane }
         }
+        // Start at the top of the screen rather than below the clock: the
+        // place name goes up into the band beside it, and everything under it
+        // comes up by that row's height.
+        .ignoresSafeArea(edges: liftHeaderIntoStatusBand ? .top : [])
         .safeAreaInset(edge: .bottom) {
             ZStack {
                 // Places button – centred

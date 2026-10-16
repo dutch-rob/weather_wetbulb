@@ -51,11 +51,87 @@ struct ContentView: View {
     @AppStorage(SettingsKey.useFoldTimeline) private var useFoldTimeline = false
     @AppStorage(SettingsKey.indoorTrackingEnabled) private var indoorTracking = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     private let indoorTimer = Timer.publish(every: 900, on: .main, in: .common).autoconnect()
 
     private var displayTitle: String {
         if let name = selectedPlace?.name { return name }
         return weather.placeDescription.isEmpty ? "Loading…" : weather.placeDescription
+    }
+
+    // MARK: - Folding device
+
+    /// How the device is folded and how flat it lies.
+    @StateObject private var posture = DevicePosture()
+    /// The panel itself, safe areas included. The crease is its middle, and
+    /// half its height is the part of a propped-open device you can see.
+    @State private var metrics = WindowMetrics()
+    /// Where the split pane starts inside that panel.
+    @State private var splitOriginX: CGFloat = 0
+
+    private enum LayoutMode { case pager, splitPane }
+
+    /// Shortest side that still belongs to a tablet rather than an open phone.
+    ///
+    /// Measured on the short side rather than the width, because the width
+    /// changes with orientation and the device does not: an unfolded iPhone Duo
+    /// is 669 x 951 pt, so in landscape it is 951 pt wide and sails past any
+    /// width test. Its short side is 669 pt whichever way it is held, against
+    /// 744 pt for the smallest iPad, so the gap holds in both orientations.
+    private static let tabletMinShortSide: CGFloat = 700
+
+    /// Which layout the panel gets. Size class cannot decide this on its own:
+    /// an unfolded foldable reports regular in *both* dimensions exactly as an
+    /// iPad does, while being barely half its width.
+    private var layoutMode: LayoutMode {
+        // Propped on a table there is one visible half, and it shows one
+        // screen. Not negotiable by measurement: halving the height makes the
+        // visible part wider than it is tall, which would otherwise read as
+        // room for two panes.
+        if isTabletopPose { return .pager }
+        guard horizontalSizeClass == .regular, verticalSizeClass == .regular else { return .pager }
+        let size = metrics.size
+        guard size.width > 0, size.height > 0 else { return .pager }
+        // An iPad keeps the single-screen layout it ships with today.
+        guard min(size.width, size.height) < Self.tabletMinShortSide else { return .pager }
+        // Only split across the crease. Open like a book the fold is vertical
+        // and the panels sit side by side, which is the pose the split is for.
+        // Turned upright the panels are above and below each other, so a
+        // left/right split would straddle the fold.
+        return size.width > size.height ? .splitPane : .pager
+    }
+
+    /// Propped open on a surface with the fold running across, so the half
+    /// facing you is the top one. Only this pose: open flat, or held with the
+    /// fold upright, and the usual layouts apply.
+    private var isTabletopPose: Bool {
+        posture.isTabletop
+            && metrics.size.height > metrics.size.width      // panels above and below
+            && min(metrics.size.width, metrics.size.height) < Self.tabletMinShortSide
+    }
+
+    /// The big inner screen, where the status corner sits above the content
+    /// rather than beside it.
+    private var onInnerDisplay: Bool { min(metrics.size.width, metrics.size.height) > 600 }
+
+    /// Beside the graph the table is permanent, which is also what hides the
+    /// buttons that would navigate to it.
+    private var tableAlongside: Bool { layoutMode == .splitPane }
+    private var tableIsReachable: Bool { showTable && !tableAlongside }
+
+    /// Width the left pane needs so the divider lands on the crease.
+    private var creaseLeftWidth: CGFloat {
+        guard metrics.size.width > 0 else { return 0 }
+        return max(0, metrics.size.width / 2 - splitOriginX)
+    }
+
+    /// How far a graph may spread into the strip the system reserves at the
+    /// trailing side. Only the graph does: the buttons stay inside the safe
+    /// area, because on the folded screen that strip is where the camera is,
+    /// and a button sliding under the camera is worse than a narrow graph.
+    private var graphInsetBonus: (leading: CGFloat, trailing: CGFloat) {
+        (max(0, metrics.safeInsets.left), max(0, metrics.safeInsets.right))
     }
 
     var body: some View {
@@ -93,33 +169,7 @@ struct ContentView: View {
 
             Divider()
 
-            if useFoldTimeline {
-                if showTable && foldShowsTable {
-                    forecastTableTab
-                } else {
-                    foldTab
-                }
-            } else {
-                GeometryReader { geo in
-                    let hgt = geo.size.height
-                    ZStack {
-                        // The screen being dragged towards, parked just off the
-                        // edge so it slides in with the finger.
-                        if dragY != 0 {
-                            screenView(screen.advanced(by: dragY < 0 ? 1 : -1,
-                                                       includeTable: false))
-                                .offset(y: dragY < 0 ? hgt + dragY : -hgt + dragY)
-                        }
-                        screenView(screen).offset(y: dragY)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .contentShape(Rectangle())
-                    // The table owns its own vertical scrolling, so it opts out
-                    // of this gesture and switches screens on over-scroll instead.
-                    .gesture(screen == .table ? nil : graphDrag(size: geo.size))
-                }
-            }
+            if layoutMode == .splitPane { splitPaneLayout } else { phoneContentPane }
         }
         .safeAreaInset(edge: .bottom) {
             ZStack {
@@ -160,6 +210,37 @@ struct ContentView: View {
                 }
             }
             .background(.bar)
+        }
+        // Propped on a table, the lower half lies flat facing the ceiling;
+        // everything worth reading belongs in the half tilted toward you,
+        // pinned to the top of the panel rather than floating in the middle.
+        //
+        // The button bar is inside this cap, not outside it: capping the
+        // content alone would leave the bar at the foot of the whole panel,
+        // which both puts the controls in the half you cannot see and pushes
+        // the graph past the fold by the bar's own height.
+        .frame(maxHeight: isTabletopPose ? metrics.size.height / 2 : nil, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background {
+            // Zero-sized host for the hinge interaction, which is UIKit-only.
+            HingeReader { angle, status, partlyOpen in
+                posture.apply(angle: angle, status: status, partlyOpen: partlyOpen)
+            }
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
+        .task { posture.start() }
+        // The whole panel, status corner and all — read from the window, since
+        // a SwiftUI background reports what is left after the safe area and
+        // ignoresSafeArea() does not change that.
+        //
+        // Full-size, not zero-size: a view with no dimensions never gets a
+        // layout pass, so it reports the window it was born in and keeps
+        // reporting it. Unfolding then leaves the split sized to half the
+        // *outer* screen, a quarter of the way across the panel.
+        .background {
+            WindowMetricsReader { metrics = $0 }
+                .allowsHitTesting(false)
         }
         .sheet(isPresented: $showPlaces) {
             NavigationStack {
@@ -333,6 +414,75 @@ struct ContentView: View {
 
     /// Title with buttons to the screens the user is not on. Gestures alone are
     /// impractical for reaching a screen now that the graphs scroll ten days.
+    /// One screen at a time, swiped between: a phone, the outer screen of a
+    /// folded device, or an open one held with the fold running across.
+    @ViewBuilder
+    private var phoneContentPane: some View {
+        if useFoldTimeline {
+            if showTable && foldShowsTable {
+                forecastTableTab
+            } else {
+                foldTab
+            }
+        } else {
+            GeometryReader { geo in
+                let hgt = geo.size.height
+                ZStack {
+                    // The screen being dragged towards, parked just off the
+                    // edge so it slides in with the finger.
+                    if dragY != 0 {
+                        screenView(screen.advanced(by: dragY < 0 ? 1 : -1,
+                                                   includeTable: false))
+                            .offset(y: dragY < 0 ? hgt + dragY : -hgt + dragY)
+                    }
+                    screenView(screen).offset(y: dragY)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .contentShape(Rectangle())
+                // The table owns its own vertical scrolling, so it opts out
+                // of this gesture and switches screens on over-scroll instead.
+                .gesture(screen == .table ? nil : graphDrag(size: geo.size))
+            }
+        }
+    }
+
+    /// Open like a book: the table on the half that folds away, the graph on
+    /// the half that carries the outer screen.
+    ///
+    /// Even halves, because the halves are physical. Putting the graph on the
+    /// panel that was already showing it means opening the device reads as the
+    /// other half turning transparent, rather than as the layout rearranging
+    /// itself under your hands.
+    private var splitPaneLayout: some View {
+        HStack(spacing: 0) {
+            forecastTableTab
+                // Air at the screen edge and at the fold, where the outer
+                // columns were running into both. The pane's width is fixed to
+                // the crease, so insetting the table moves nothing else.
+                .padding(.leading, 8)
+                .padding(.trailing, 10)
+                // Fixed, not capped: a cap only stops the pane growing past
+                // the crease, and the stack hands it less than that anyway,
+                // which leaves the graph starting before the fold even when the
+                // crease itself was worked out correctly.
+                .frame(width: creaseLeftWidth > 0 ? creaseLeftWidth : nil)
+            Divider()
+            phoneContentPane
+                .frame(maxWidth: .infinity)
+                // Out to the panel edge, under the clock. This pane's left edge
+                // is pinned to the crease, so the width is gained on the right
+                // rather than shifting the pane sideways.
+                .padding(.trailing, -graphInsetBonus.trailing)
+        }
+        // The crease is the middle of the panel, and this reports where the
+        // split begins inside it. Reconstructing the panel width from safe-area
+        // insets was guesswork and landed the divider left of the fold.
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.frame(in: .global).minX
+        } action: { splitOriginX = $0 }
+    }
+
     private func headerBar(_ title: String,
                            left: (String, () -> Void)? = nil,
                            right: (String, () -> Void)? = nil) -> some View {
@@ -394,7 +544,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             headerBar(windowLabel(.today),
                       left: ("10-day", { goToScreen(.tenDay) }),
-                      right: showTable ? ("table", { goToTable() }) : nil)
+                      right: tableIsReachable ? ("table", { goToTable() }) : nil)
             HereTodayView(
                 allSeries: weather.isRefreshing ? [] : panSeries,
                 windowStart: windowStart,
@@ -413,7 +563,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             headerBar(windowLabel(.tenDay),
                       left: ("24h", { goToScreen(.today) }),
-                      right: showTable ? ("table", { goToTable() }) : nil)
+                      right: tableIsReachable ? ("table", { goToTable() }) : nil)
             TenDayView(
                 allSeries: weather.isRefreshing ? [] : panSeries,
                 windowStart: windowStart,
@@ -429,12 +579,19 @@ struct ContentView: View {
 
     /// The table's header doubles as navigation.
     private var tableHeader: some View {
-        useFoldTimeline
-            ? headerBar(ForecastScreen.table.title,
-                        left: ("graph", { leaveTable(to: nil) }))
-            : headerBar(ForecastScreen.table.title,
-                        left: ("24h", { leaveTable(to: .today) }),
-                        right: ("10-day", { leaveTable(to: .tenDay) }))
+        // Beside the graph the table is simply there, in its own half: nothing
+        // navigates to it and nothing leaves it, so the buttons that would are
+        // left off and the title stands alone.
+        if tableAlongside {
+            headerBar(ForecastScreen.table.title)
+        } else if useFoldTimeline {
+            headerBar(ForecastScreen.table.title,
+                      left: ("graph", { leaveTable(to: nil) }))
+        } else {
+            headerBar(ForecastScreen.table.title,
+                      left: ("24h", { leaveTable(to: .today) }),
+                      right: ("10-day", { leaveTable(to: .tenDay) }))
+        }
     }
 
     /// Entering the table: line it up with the moment the graph is showing.
@@ -472,6 +629,7 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private var forecastTableTab: some View {
         VStack(spacing: 0) {
             tableHeader
@@ -488,7 +646,7 @@ struct ContentView: View {
     private var foldTab: some View {
         VStack(spacing: 0) {
             headerBar("graph",
-                      right: showTable ? ("table", { goToTable() }) : nil)
+                      right: tableIsReachable ? ("table", { goToTable() }) : nil)
             FoldTimelineView(
                 series: weather.isRefreshing ? [] : panSeries,
                 startOffset: $startOffset,

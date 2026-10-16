@@ -18,6 +18,12 @@ final class IndoorForecastUITests: XCTestCase {
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["FORECAST_PREVIEW"] = "1"
+        // The indoor forecast is reached from the zoom graph, so the zoom graph
+        // has to be on. Forced rather than inherited: a simulator that has
+        // never run the app has it off, and these tests then wait twenty
+        // seconds for a screen that was never going to appear. Launch
+        // arguments win over stored defaults.
+        app.launchArguments += ["-useFoldTimeline", "YES"]
         app.launch()
         return app
     }

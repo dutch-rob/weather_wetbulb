@@ -84,9 +84,17 @@ struct HereTodayView: View {
     /// keep the full height and give up width, which they have to spare.
     private var landscapeLayout: Bool { verticalSizeClass == .compact || forceLandscapeLayout }
 
+    /// Height kept above a plot for its legend. `ChartLegendRow` folds onto a
+    /// second line rather than wrap mid-word, and at half the width it always
+    /// does — reserving one line's worth pushed the attribution off the foot
+    /// of the screen, where the pane clipped it.
+    private var legendReserve: CGFloat { landscapeLayout ? 38 : 20 }
+
     /// Hours between labelled ticks. Side by side each chart has half the
     /// width, and a label every two hours collapses into a row of ellipses.
-    private var hourStride: Int { landscapeLayout ? 4 : 2 }
+    /// Three rather than four: four leaves the first label most of a morning
+    /// in from the axis, which reads as a missing label.
+    private var hourStride: Int { landscapeLayout ? 3 : 2 }
 
     /// Roughly where a chart's plot sits inside the frame it is given: below
     /// its legend, above its hour labels, right of its y-axis labels. The
@@ -480,7 +488,7 @@ struct HereTodayView: View {
                     .padding(.top, 2)
             }
             .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
-            .frame(height: height - 20)
+            .frame(height: height - legendReserve)
         }
     }
 
@@ -578,7 +586,7 @@ struct HereTodayView: View {
             .ifLet(filledDateDomain) { view, domain in view.chartXScale(domain: domain) }
             .chartPlotStyle { $0.clipped() }
             .chartOverlay { proxy in scrubOverlay(proxy) }
-            .frame(height: height - 20)
+            .frame(height: height - legendReserve)
 
             if !standalone {
                 ChartLegendRow(entries: filledWindLegend, ink: axisInk)
@@ -643,7 +651,7 @@ struct HereTodayView: View {
             .chartPlotStyle { $0.clipped() }
             .chartOverlay { proxy in scrubOverlay(proxy) }
             .overlay(alignment: scrubFraction < 0.5 ? .topTrailing : .topLeading) { scrubReadoutHUD }
-            .frame(height: height - 20)
+            .frame(height: height - legendReserve)
         }
     }
 
@@ -695,7 +703,7 @@ struct HereTodayView: View {
             .ifLet(dateDomain) { view, domain in view.chartXScale(domain: domain) }
             .chartPlotStyle { $0.clipped() }
             .chartOverlay { proxy in scrubOverlay(proxy) }
-            .frame(height: height - 20)
+            .frame(height: height - legendReserve)
         }
     }
 }

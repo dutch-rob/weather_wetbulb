@@ -31,6 +31,36 @@ struct WindowMetrics: Equatable {
     var statusAtTopTrailing: Bool {
         statusFrame.width > 0 && statusFrame.maxX >= size.width - 1
     }
+
+    /// How far down a side strip the clock and wifi reach. Measured off the
+    /// folded screen rather than asked for, because nothing publishes it: the
+    /// system says how wide the strip is and never what is in it. The wifi
+    /// badge ends about 152 pt down a 678 pt panel; this leaves a margin.
+    static let sideStripStatusDepth: CGFloat = 170
+
+    /// Where the clock and wifi actually sit, in window coordinates.
+    ///
+    /// `statusBarFrame` is the right answer when the system gives one — opened
+    /// out, it reports the corner it occupies and nothing more. Folded shut it
+    /// reports a band the full width of the window and two points tall, which
+    /// describes nothing: on that screen the clock is not along the top at all,
+    /// it is down the strip the safe area reserves at one side. So a frame
+    /// that spans the whole width is treated as no answer, and the reserved
+    /// strip is taken as the corner instead.
+    var statusCorner: CGRect {
+        if statusFrame.height >= 20, statusFrame.width < size.width - 1 {
+            return statusFrame
+        }
+        if safeInsets.right > 0 {
+            return CGRect(x: size.width - safeInsets.right, y: 0,
+                          width: safeInsets.right, height: Self.sideStripStatusDepth)
+        }
+        if safeInsets.left > 0 {
+            return CGRect(x: 0, y: 0, width: safeInsets.left,
+                          height: Self.sideStripStatusDepth)
+        }
+        return .zero
+    }
 }
 
 struct WindowMetricsReader: UIViewRepresentable {

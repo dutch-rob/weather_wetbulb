@@ -219,7 +219,18 @@ struct ContentView: View {
 
             if !liftHeaderIntoStatusBand { Divider() }
 
-            if layoutMode == .splitPane { splitPaneLayout } else { phoneContentPane }
+            if layoutMode == .splitPane {
+                splitPaneLayout
+            } else {
+                // Out to the panel edges, under the clock and past the camera.
+                // This has to sit outside the pane, not on the graph inside
+                // it: the pager clips to its own bounds so that a screen being
+                // dragged in stays off the one it is replacing, and anything
+                // the graph hangs over the edge is clipped away with it.
+                phoneContentPane
+                    .padding(.leading, -graphBleed.leading)
+                    .padding(.trailing, -graphBleed.trailing)
+            }
         }
         // Start at the top of the screen rather than below the clock: the
         // place name goes up into the band beside it, and everything under it
@@ -556,6 +567,11 @@ struct ContentView: View {
                 .padding(.horizontal, 12)
             }
             .padding(.vertical, 5)
+            // The pane under this is widened to let the graph pass beneath the
+            // clock and the camera; buttons are given that width back, because
+            // a button under the camera is worse than a narrow graph.
+            .padding(.leading, graphBleed.leading)
+            .padding(.trailing, graphBleed.trailing)
             .background(.bar)
             Divider()
         }
@@ -611,14 +627,9 @@ struct ContentView: View {
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
                 // Propped open, the visible half is wider than it is tall
                 // whatever the size class reports for the panel as a whole.
-                statusCorner: metrics.statusFrame,
+                statusCorner: metrics.statusCorner,
                 forceLandscapeLayout: isTabletopPose
             )
-            // Out to the panel edges, under the clock and past the camera.
-            // Only the graph goes there: the header and the button bar stay
-            // inside the safe area, where nothing is carved out of them.
-            .padding(.leading, -graphBleed.leading)
-            .padding(.trailing, -graphBleed.trailing)
         }
     }
 
@@ -638,14 +649,9 @@ struct ContentView: View {
                 onRefresh: { await loadWeather(preserveData: true, useFreshLocation: true) },
                 // Propped open, the visible half is wider than it is tall
                 // whatever the size class reports for the panel as a whole.
-                statusCorner: metrics.statusFrame,
+                statusCorner: metrics.statusCorner,
                 forceLandscapeLayout: isTabletopPose
             )
-            // Out to the panel edges, under the clock and past the camera.
-            // Only the graph goes there: the header and the button bar stay
-            // inside the safe area, where nothing is carved out of them.
-            .padding(.leading, -graphBleed.leading)
-            .padding(.trailing, -graphBleed.trailing)
         }
     }
 
@@ -712,6 +718,10 @@ struct ContentView: View {
                 onSwitchScreen: { _ in leaveTable(to: nil) },
                 topDate: $tableTopDate
             )
+            // Rows of figures gain nothing from passing under the clock, and
+            // the rightmost column would go under it first.
+            .padding(.leading, graphBleed.leading)
+            .padding(.trailing, graphBleed.trailing)
         }
     }
 

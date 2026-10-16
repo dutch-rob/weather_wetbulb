@@ -75,6 +75,13 @@ struct InfoView: View {
                 }
 
                 Group {
+                    Text("On a folding phone").font(.headline)
+                    Text("Opened out, the screen is laid out around the crease: the table takes the left half and the graph the right, with the divider landing on the fold itself, so opening the phone reads as the second half turning transparent rather than as the screen rearranging itself. The table is simply there beside the graph, so the buttons that would switch to it are left off. Held the other way up, with the fold running across rather than down, the graph keeps the whole screen — a left-and-right split would sit astride the crease.")
+                    Text("Fold it part way and stand it on a table, and everything moves into the half tilted towards you, buttons included, leaving the half lying flat to the sky.")
+                    Text("Folded shut, the outer screen works like any other phone.")
+                }
+
+                Group {
                     Text("Apple Watch").font(.headline)
                     Text("WetBulbCast includes an Apple Watch app that fetches its own forecast, so it works without your phone nearby. Swipe between a table, a 24-hour screen and a 10-day screen. It follows the units and chart style you picked on the phone, and your places are sent across from the phone.")
                     Text("Two watch-face complications are available — a corner one and a circular one. Both show the current wet-bulb temperature, ringed by a gauge covering the day's wet-bulb range, colored from cool to dangerously humid.")
